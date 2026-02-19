@@ -108,19 +108,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFE6D3AE),
       appBar: AppBar(
-        title: const Text("Register"),
-        backgroundColor: Colors.red,
+        title: const Text(
+          "Register",
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+        ),
+        backgroundColor: const Color(0xFFE64646),
         foregroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back_outlined),
           onPressed: () => Navigator.pop(context),
         ),
       ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+            padding: const EdgeInsets.fromLTRB(28, 32, 28, 32),
             child: Form(
               key: _formKey,
               child: Column(
@@ -156,14 +162,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     textInputAction: TextInputAction.next,
                     decoration: InputDecoration(
                       labelText: 'Full Name',
-                      prefixIcon: const Icon(Icons.person_outline, color: Colors.red),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      filled: true,
-                      fillColor: Colors.grey.shade50,
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Colors.red, width: 2),
-                        borderRadius: BorderRadius.circular(12),
+                      labelStyle: const TextStyle(color: Color(0xFFB0B0B0), fontWeight: FontWeight.w500),
+                      prefixIcon: const Icon(Icons.person_outline, color: Color(0xFFE64646), size: 20),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFE6D5D5)),
                       ),
+                      filled: true,
+                      fillColor: Colors.white,
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: const BorderSide(color: Color(0xFFE64646), width: 2),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) return 'Please enter your name';
@@ -178,15 +189,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
                     decoration: InputDecoration(
-                      labelText: 'Email',
-                      prefixIcon: const Icon(Icons.email_outlined, color: Colors.red),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      filled: true,
-                      fillColor: Colors.grey.shade50,
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Colors.red, width: 2),
-                        borderRadius: BorderRadius.circular(12),
+                      labelText: 'Email Address',
+                      labelStyle: const TextStyle(color: Color(0xFFB0B0B0), fontWeight: FontWeight.w500),
+                      prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFFE64646), size: 20),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFE6D5D5)),
                       ),
+                      filled: true,
+                      fillColor: Colors.white,
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: const BorderSide(color: Color(0xFFE64646), width: 2),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) return 'Please enter your email';
@@ -204,21 +220,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     textInputAction: TextInputAction.next,
                     decoration: InputDecoration(
                       labelText: 'Password',
-                      prefixIcon: const Icon(Icons.lock_outline, color: Colors.red),
+                      labelStyle: const TextStyle(color: Color(0xFFB0B0B0), fontWeight: FontWeight.w500),
+                      prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFFE64646), size: 20),
                       suffixIcon: IconButton(
                         icon: Icon(
-                          _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                          color: Colors.red,
+                          _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                          color: const Color(0xFFE64646),
+                          size: 20,
                         ),
                         onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                       ),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      filled: true,
-                      fillColor: Colors.grey.shade50,
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Colors.red, width: 2),
-                        borderRadius: BorderRadius.circular(12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFE6D5D5)),
                       ),
+                      filled: true,
+                      fillColor: Colors.white,
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: const BorderSide(color: Color(0xFFE64646), width: 2),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                     ),
                     validator: (value) {
                       if (value == null || value.isEmpty) return 'Please enter a password';
@@ -234,21 +256,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     textInputAction: TextInputAction.done,
                     decoration: InputDecoration(
                       labelText: 'Confirm Password',
-                      prefixIcon: const Icon(Icons.lock_outline, color: Colors.red),
+                      labelStyle: const TextStyle(color: Color(0xFFB0B0B0), fontWeight: FontWeight.w500),
+                      prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFFE64646), size: 20),
                       suffixIcon: IconButton(
                         icon: Icon(
-                          _obscureConfirmPassword ? Icons.visibility_off : Icons.visibility,
-                          color: Colors.red,
+                          _obscureConfirmPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                          color: const Color(0xFFE64646),
+                          size: 20,
                         ),
                         onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
                       ),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      filled: true,
-                      fillColor: Colors.grey.shade50,
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Colors.red, width: 2),
-                        borderRadius: BorderRadius.circular(12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFE6D5D5)),
                       ),
+                      filled: true,
+                      fillColor: Colors.white,
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: const BorderSide(color: Color(0xFFE64646), width: 2),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
@@ -273,11 +301,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ElevatedButton(
                     onPressed: _isLoading ? null : _register,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
+                      backgroundColor: const Color(0xFFE64646),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      elevation: 2,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                      elevation: 3,
+                      shadowColor: const Color(0xFFE64646).withOpacity(0.3),
                     ),
                     child: _isLoading
                         ? const SizedBox(
@@ -285,19 +314,29 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             width: 20,
                             child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
                           )
-                        : const Text("Register", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        : const Text(
+                            "Register",
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                          ),
                   ),
                   const SizedBox(height: 32),
 
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text("Already have an account? ", style: TextStyle(color: Colors.grey.shade700)),
+                      Text(
+                        "Already have an account? ",
+                        style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+                      ),
                       TextButton(
                         onPressed: () => Navigator.pop(context),
-                        child: Text(
+                        child: const Text(
                           "Login",
-                          style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            color: Color(0xFFE64646),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
                         ),
                       ),
                     ],

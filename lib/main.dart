@@ -78,111 +78,89 @@ class LandingPage extends StatelessWidget {
           "St. Cecilia’s Alumni",
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
         centerTitle: true,
         titleSpacing: 0,
         toolbarHeight: 56,
-        backgroundColor: Colors.red, // ← changed to red
+        backgroundColor: const Color(0xFFE64646),
         foregroundColor: Colors.white,
         elevation: 0,
         leading: Builder(
           builder: (context) => IconButton(
-            icon: const Icon(Icons.menu),
+            icon: const Icon(Icons.menu_outlined),
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
       ),
 
       drawer: Drawer(
-        backgroundColor: Colors.red, // ← red sidebar
+        backgroundColor: Colors.white,
+        elevation: 8,
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
             DrawerHeader(
-              decoration: const BoxDecoration(color: Colors.red),
-              child: const Column(
+              decoration: const BoxDecoration(color: Color(0xFFE64646)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircleAvatar(
-                    radius: 40,
-                    backgroundColor: Colors.white,
-                    child: Icon(Icons.school, size: 50, color: Colors.red),
+                  Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(50),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.15),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        )
+                      ],
+                    ),
+                    child: const CircleAvatar(
+                      radius: 32,
+                      backgroundColor: Colors.white,
+                      child: Icon(Icons.school_outlined, size: 40, color: Color(0xFFE64646)),
+                    ),
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Text(
                     'St. Cecilia’s Alumni',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 24,
+                      fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  Text(
+                  const Text(
                     'Welcome back',
-                    style: TextStyle(color: Colors.white70, fontSize: 16),
+                    style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500),
                   ),
                 ],
               ),
             ),
-            ListTile(
-              leading: const Icon(Icons.home, color: Colors.white),
-              title: const Text('Home', style: TextStyle(color: Colors.white)),
-              onTap: () => Navigator.pop(context),
-            ),
-            ListTile(
-              leading: const Icon(Icons.login, color: Colors.white),
-              title: const Text('Login', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.person_add, color: Colors.white),
-              title: const Text('Register', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Register coming soon")),
-                );
-              },
-            ),
-            const Divider(color: Colors.white30),
-            ListTile(
-              leading: const Icon(Icons.event, color: Colors.white),
-              title: const Text('Events', style: TextStyle(color: Colors.white)),
-              onTap: () => Navigator.pop(context),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: Colors.white),
-              title: const Text('Gallery', style: TextStyle(color: Colors.white)),
-              onTap: () => Navigator.pop(context),
-            ),
-            ListTile(
-              leading: const Icon(Icons.campaign, color: Colors.white),
-              title: const Text('News & Announcements', style: TextStyle(color: Colors.white)),
-              onTap: () => Navigator.pop(context),
-            ),
-            ListTile(
-              leading: const Icon(Icons.work, color: Colors.white),
-              title: const Text('Available Jobs', style: TextStyle(color: Colors.white)),
-              onTap: () => Navigator.pop(context),
-            ),
-            const Divider(color: Colors.white30),
-            ListTile(
-              leading: const Icon(Icons.settings, color: Colors.white),
-              title: const Text('Settings', style: TextStyle(color: Colors.white)),
-              onTap: () => Navigator.pop(context),
-            ),
-            ListTile(
-              leading: const Icon(Icons.help, color: Colors.white),
-              title: const Text('Help & Support', style: TextStyle(color: Colors.white)),
-              onTap: () => Navigator.pop(context),
-            ),
+            _buildEnhancedDrawerTile(Icons.home_outlined, 'Home', () => Navigator.pop(context), isPrimary: true),
+            _buildEnhancedDrawerTile(Icons.login_outlined, 'Login', () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+            }),
+            _buildEnhancedDrawerTile(Icons.person_add_outlined, 'Register', () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Register coming soon")),
+              );
+            }),
+            const Divider(color: Colors.white30, indent: 16, endIndent: 16),
+            _buildEnhancedDrawerTile(Icons.event_outlined, 'Events', () => Navigator.pop(context)),
+            _buildEnhancedDrawerTile(Icons.photo_library_outlined, 'Gallery', () => Navigator.pop(context)),
+            _buildEnhancedDrawerTile(Icons.campaign_outlined, 'News & Announcements', () => Navigator.pop(context)),
+            _buildEnhancedDrawerTile(Icons.work_outline, 'Available Jobs', () => Navigator.pop(context)),
+            const Divider(color: Colors.white30, indent: 16, endIndent: 16),
+            _buildEnhancedDrawerTile(Icons.settings_outlined, 'Settings', () => Navigator.pop(context)),
+            _buildEnhancedDrawerTile(Icons.help_outline, 'Help & Support', () => Navigator.pop(context)),
           ],
         ),
       ),
@@ -198,7 +176,10 @@ class LandingPage extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Colors.red.shade800, Colors.red.shade900], // ← red gradient
+                  colors: [
+                    const Color(0xFFE64646),
+                    const Color(0xFFF06A6A),
+                  ],
                 ),
               ),
               child: Column(
@@ -248,16 +229,17 @@ class LandingPage extends StatelessWidget {
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.white,
-                          foregroundColor: Colors.red.shade900, // ← red accent
-                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                          foregroundColor: const Color(0xFFE64646),
+                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                          elevation: 4,
                         ),
                         child: const Text(
                           "Login",
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5),
                         ),
                       ),
-                      const SizedBox(width: 20),
+                      const SizedBox(width: 16),
                       OutlinedButton(
                         onPressed: () {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -265,14 +247,14 @@ class LandingPage extends StatelessWidget {
                           );
                         },
                         style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: Colors.white, width: 2),
+                          side: const BorderSide(color: Colors.white, width: 2),
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
                         ),
                         child: const Text(
                           "Join Now",
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5),
                         ),
                       ),
                     ],
@@ -281,54 +263,54 @@ class LandingPage extends StatelessWidget {
               ),
             ),
 
-            // Feature sections (updated icons/text colors to fit red theme)
+            // Feature sections with modern card design
             _buildSection(
               title: "Gallery",
               description: "Relive special moments, school events, and alumni gatherings.",
-              icon: Icons.photo_library,
+              icon: Icons.photo_library_outlined,
               backgroundColor: Colors.white,
             ),
             _buildSection(
               title: "Upcoming Events",
               description: "Reunions, seminars, outreach programs — stay connected.",
-              icon: Icons.event,
-              backgroundColor: Colors.red.shade50, // light red background
+              icon: Icons.event_outlined,
+              backgroundColor: const Color(0xFFF5E6E6),
             ),
             _buildSection(
               title: "About Us",
               description: "Mission, vision, core values, and history of the alumni community.",
-              icon: Icons.info,
+              icon: Icons.info_outlined,
               backgroundColor: Colors.white,
             ),
             _buildSection(
               title: "Core Values",
               description: "Unity • Integrity • Service • Excellence",
-              icon: Icons.favorite,
-              backgroundColor: Colors.red.shade50,
+              icon: Icons.favorite_outline,
+              backgroundColor: const Color(0xFFF5E6E6),
             ),
             _buildSection(
               title: "News & Announcements",
               description: "Latest updates about alumni activities and school programs.",
-              icon: Icons.campaign,
+              icon: Icons.campaign_outlined,
               backgroundColor: Colors.white,
             ),
             _buildSection(
               title: "Available Jobs",
               description: "Career opportunities shared for alumni and students.",
-              icon: Icons.work,
-              backgroundColor: Colors.red.shade50,
+              icon: Icons.work_outline,
+              backgroundColor: const Color(0xFFF5E6E6),
             ),
             _buildSection(
               title: "Success Stories",
               description: "Inspiring journeys of alumni who excelled in various fields.",
-              icon: Icons.star,
+              icon: Icons.star_outline,
               backgroundColor: Colors.white,
             ),
             _buildSection(
               title: "Testimonials",
               description: "Personal messages from alumni sharing memories and pride.",
-              icon: Icons.format_quote,
-              backgroundColor: Colors.red.shade50,
+              icon: Icons.format_quote_outlined,
+              backgroundColor: const Color(0xFFF5E6E6),
             ),
 
             const SizedBox(height: 80),
@@ -353,38 +335,108 @@ class LandingPage extends StatelessWidget {
     Color? backgroundColor,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
       color: backgroundColor ?? Colors.white,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (icon != null)
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.red.shade100, // ← red accent
+                color: const Color(0xFFE79A9A),
                 borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFE64646).withOpacity(0.15),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  )
+                ],
               ),
-              child: Icon(icon, size: 32, color: Colors.red.shade800),
+              child: Icon(icon, size: 28, color: const Color(0xFFE64646), weight: 300),
             ),
-          if (icon != null) const SizedBox(width: 20),
+          if (icon != null) const SizedBox(width: 24),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.2,
+                    color: Color(0xFF2D2D2D),
+                  ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Text(
                   description,
-                  style: TextStyle(fontSize: 16, height: 1.5, color: Colors.grey.shade800),
+                  style: TextStyle(
+                    fontSize: 15,
+                    height: 1.6,
+                    color: Colors.grey.shade700,
+                    fontWeight: FontWeight.w400,
+                    letterSpacing: 0.1,
+                  ),
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEnhancedDrawerTile(
+    IconData icon,
+    String label,
+    VoidCallback onTap, {
+    bool isPrimary = false,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        splashColor: const Color(0xFFE64646).withOpacity(0.1),
+        highlightColor: const Color(0xFFE64646).withOpacity(0.05),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: isPrimary ? const Color(0xFFF5E6E6) : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: ListTile(
+            leading: Icon(
+              icon,
+              color: isPrimary ? const Color(0xFFE64646) : Colors.grey.shade700,
+              size: 22,
+              weight: 300,
+            ),
+            title: Text(
+              label,
+              style: TextStyle(
+                color: isPrimary ? const Color(0xFFE64646) : Colors.grey.shade800,
+                fontSize: 15,
+                fontWeight: isPrimary ? FontWeight.bold : FontWeight.w500,
+                letterSpacing: 0.2,
+              ),
+            ),
+            trailing: isPrimary
+                ? Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE64646),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(Icons.check, size: 14, color: Colors.white),
+                  )
+                : null,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            visualDensity: VisualDensity.compact,
+          ),
+        ),
       ),
     );
   }
