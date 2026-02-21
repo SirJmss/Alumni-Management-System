@@ -2,17 +2,15 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'firebase_options.dart';
 
-// Import your screens (adjust paths if needed)
+import 'package:alumni/features/gallery/presentation/screens/gallery_screen.dart';
 import 'package:alumni/features/auth/presentation/screens/login_screen.dart';
 import 'package:alumni/features/dashboard/presentation/screens/dashboard_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-
   runApp(const MyApp());
 }
 
@@ -25,7 +23,6 @@ class MyApp extends StatelessWidget {
       title: 'St. Cecilia’s Alumni',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // ── Changed to red theme to match dashboard ──
         colorScheme: ColorScheme.fromSeed(
           seedColor: Colors.red.shade800,
           primary: Colors.red.shade800,
@@ -58,8 +55,6 @@ class MyApp extends StatelessWidget {
         ),
       ),
       home: const LandingPage(),
-
-      // Named routes (already correct)
       routes: {
         '/dashboard': (context) => const DashboardScreen(),
       },
@@ -93,7 +88,6 @@ class LandingPage extends StatelessWidget {
           ),
         ),
       ),
-
       drawer: Drawer(
         backgroundColor: Colors.white,
         elevation: 8,
@@ -127,7 +121,7 @@ class LandingPage extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Text(
+                  const Text(
                     'St. Cecilia’s Alumni',
                     style: TextStyle(
                       color: Colors.white,
@@ -155,7 +149,13 @@ class LandingPage extends StatelessWidget {
             }),
             const Divider(color: Colors.white30, indent: 16, endIndent: 16),
             _buildEnhancedDrawerTile(Icons.event_outlined, 'Events', () => Navigator.pop(context)),
-            _buildEnhancedDrawerTile(Icons.photo_library_outlined, 'Gallery', () => Navigator.pop(context)),
+            _buildEnhancedDrawerTile(Icons.photo_library_outlined, 'Gallery', () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const GalleryScreen()),
+              );
+            }),
             _buildEnhancedDrawerTile(Icons.campaign_outlined, 'News & Announcements', () => Navigator.pop(context)),
             _buildEnhancedDrawerTile(Icons.work_outline, 'Available Jobs', () => Navigator.pop(context)),
             const Divider(color: Colors.white30, indent: 16, endIndent: 16),
@@ -164,7 +164,6 @@ class LandingPage extends StatelessWidget {
           ],
         ),
       ),
-
       body: SafeArea(
         child: ListView(
           physics: const ClampingScrollPhysics(),
@@ -262,8 +261,7 @@ class LandingPage extends StatelessWidget {
                 ],
               ),
             ),
-
-            // Feature sections with modern card design
+            // Feature sections
             _buildSection(
               title: "Gallery",
               description: "Relive special moments, school events, and alumni gatherings.",
@@ -312,7 +310,6 @@ class LandingPage extends StatelessWidget {
               icon: Icons.format_quote_outlined,
               backgroundColor: const Color(0xFFF5E6E6),
             ),
-
             const SizedBox(height: 80),
             Padding(
               padding: const EdgeInsets.all(24),
