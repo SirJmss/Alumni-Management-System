@@ -148,7 +148,6 @@ class LandingPage extends StatelessWidget {
               );
             }),
             const Divider(color: Colors.white30, indent: 16, endIndent: 16),
-            _buildEnhancedDrawerTile(Icons.event_outlined, 'Events', () => Navigator.pop(context)),
             _buildEnhancedDrawerTile(Icons.photo_library_outlined, 'Gallery', () {
               Navigator.pop(context);
               Navigator.push(
@@ -156,10 +155,7 @@ class LandingPage extends StatelessWidget {
                 MaterialPageRoute(builder: (_) => const GalleryScreen()),
               );
             }),
-            _buildEnhancedDrawerTile(Icons.campaign_outlined, 'News & Announcements', () => Navigator.pop(context)),
-            _buildEnhancedDrawerTile(Icons.work_outline, 'Available Jobs', () => Navigator.pop(context)),
             const Divider(color: Colors.white30, indent: 16, endIndent: 16),
-            _buildEnhancedDrawerTile(Icons.settings_outlined, 'Settings', () => Navigator.pop(context)),
             _buildEnhancedDrawerTile(Icons.help_outline, 'Help & Support', () => Navigator.pop(context)),
           ],
         ),

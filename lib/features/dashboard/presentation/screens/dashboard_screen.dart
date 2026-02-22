@@ -2,7 +2,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+
 import 'package:alumni/features/profile/presentation/screens/profile_screen.dart';
+import 'package:alumni/features/event/presentation/screens/event_list_screen.dart';
+import 'package:alumni/features/gallery/presentation/screens/gallery_screen.dart';
+import 'package:alumni/features/announcements/presentation/screens/announcements_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -12,9 +16,13 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  // User profile data
   String userRole = 'alumni';
-  bool isLoadingRole = true;
+  String userName = 'Member';
+  String? userPhotoUrl;
+  bool isLoadingProfile = true;
 
+  // Dashboard stats & lists
   int totalAlumni = 0;
   int upcomingEventsCount = 0;
   int announcementsCount = 0;
@@ -29,34 +37,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    _loadUserRole();
+    _loadUserProfile();
     _loadDashboardData();
   }
 
-  Future<void> _loadUserRole() async {
+  Future<void> _loadUserProfile() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      if (mounted) setState(() => isLoadingRole = false);
+      if (mounted) setState(() => isLoadingProfile = false);
       return;
     }
 
-    setState(() => isLoadingRole = true);
-
     try {
       final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      if (doc.exists && mounted) {
-        setState(() {
-          userRole = (doc.data()?['role'] as String?) ?? 'alumni';
-        });
+      if (doc.exists) {
+        final data = doc.data()!;
+        if (mounted) {
+          setState(() {
+            userRole = data['role'] as String? ?? 'alumni';
+            userName = data['fullName'] as String? ??
+                data['name'] as String? ??
+                user.displayName ??
+                'Member';
+            userPhotoUrl = data['photoUrl'] as String? ?? user.photoURL;
+          });
+        }
       }
     } catch (e) {
-      // Silent fail - default role is fine
+      debugPrint('Profile load error: $e');
+      // silent fallback - keep defaults
     }
 
-    if (mounted) setState(() => isLoadingRole = false);
+    if (mounted) setState(() => isLoadingProfile = false);
   }
 
   Future<void> _loadDashboardData() async {
+    if (!mounted) return;
+
     setState(() {
       isLoadingData = true;
       errorMessage = null;
@@ -64,68 +81,80 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     try {
       final firestore = FirebaseFirestore.instance;
-
-      // 1. Total Alumni
-      final usersSnap = await firestore.collection('users').get();
-      totalAlumni = usersSnap.size;
-
-      // 2. Upcoming Events
       final now = Timestamp.now();
-      final eventsSnap = await firestore
-          .collection('events')
-          .where('startDate', isGreaterThan: now)
-          .orderBy('startDate')
-          .limit(5)
-          .get();
 
-      upcomingEventsCount = eventsSnap.size;
-      upcomingEvents = eventsSnap.docs.map((doc) {
-        final data = doc.data();
-        return {
-          'id': doc.id,
-          'title': data['title'] as String? ?? 'No title',
-          'startDate': data['startDate'] as Timestamp?,
-        };
-      }).toList();
+      // Parallel fetches for better performance
+      final results = await Future.wait([
+        // 0: total alumni
+        firestore.collection('users').count().get(),
+        // 1: upcoming events
+        firestore
+            .collection('events')
+            .where('startDate', isGreaterThan: now)
+            .orderBy('startDate')
+            .limit(5)
+            .get(),
+        // 2: announcements count
+        firestore.collection('announcements').count().get(),
+        // 3: recent announcements
+        firestore
+            .collection('announcements')
+            .orderBy('publishedAt', descending: true)
+            .limit(3)
+            .get(),
+        // 4: courses count
+        firestore.collection('courses').count().get(),
+      ]);
 
-      // 3. Total Announcements
-      final annSnap = await firestore.collection('announcements').get();
-      announcementsCount = annSnap.size;
+      if (!mounted) return;
 
-      // 4. Recent Announcements
-      final recentAnnSnap = await firestore
-          .collection('announcements')
-          .orderBy('publishedAt', descending: true)
-          .limit(3)
-          .get();
+      setState(() {
+        totalAlumni = (results[0] as AggregateQuerySnapshot).count ?? 0;
 
-      recentAnnouncements = recentAnnSnap.docs.map((doc) {
-        final data = doc.data();
-        return {
-          'id': doc.id,
-          'title': data['title'] as String? ?? 'No title',
-          'content': data['content'] as String? ?? 'No content',
-          'publishedAt': data['publishedAt'] as Timestamp?,
-        };
-      }).toList();
+        final eventsSnap = results[1] as QuerySnapshot;
+        upcomingEventsCount = eventsSnap.size;
+        upcomingEvents = eventsSnap.docs.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return {
+            'id': doc.id,
+            'title': data['title'] as String? ?? 'Untitled Event',
+            'startDate': data['startDate'] as Timestamp?,
+            'description': data['description'] as String?,
+            'location': data['location'] as String?,
+          };
+        }).toList();
 
-      // 5. Courses (optional)
-      final coursesSnap = await firestore.collection('courses').get();
-      coursesCount = coursesSnap.size;
+        announcementsCount = (results[2] as AggregateQuerySnapshot).count ?? 0;
+
+        final annSnap = results[3] as QuerySnapshot;
+        recentAnnouncements = annSnap.docs.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return {
+            'id': doc.id,
+            'title': data['title'] as String? ?? 'Announcement',
+            'content': data['content'] as String? ?? '',
+            'publishedAt': data['publishedAt'] as Timestamp?,
+          };
+        }).toList();
+
+        coursesCount = (results[4] as AggregateQuerySnapshot).count ?? 0;
+
+        isLoadingData = false;
+      });
     } catch (e) {
-      errorMessage = 'Failed to load dashboard: $e';
       if (mounted) {
+        setState(() {
+          errorMessage = 'Failed to load dashboard data. Please try again.';
+          isLoadingData = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(errorMessage!),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
+            backgroundColor: const Color(0xFFE64646),
           ),
         );
       }
     }
-
-    if (mounted) setState(() => isLoadingData = false);
   }
 
   Future<void> _logout() async {
@@ -141,7 +170,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Logout', style: TextStyle(color: Color(0xFFE64646))),
+            child: const Text(
+              'Logout',
+              style: TextStyle(color: Color(0xFFE64646)),
+            ),
           ),
         ],
       ),
@@ -149,9 +181,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (confirmed == true) {
       await FirebaseAuth.instance.signOut();
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/');
-      }
+      if (mounted) Navigator.pushReplacementNamed(context, '/');
     }
   }
 
@@ -176,81 +206,136 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             DrawerHeader(
               decoration: const BoxDecoration(color: Color(0xFFE64646)),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
+              child: Row(
                 children: [
-                  const Text(
-                    'Welcome',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.3,
+                  CircleAvatar(
+                    radius: 36,
+                    backgroundColor: Colors.white,
+                    backgroundImage:
+                        userPhotoUrl != null ? NetworkImage(userPhotoUrl!) : null,
+                    child: userPhotoUrl == null
+                        ? Text(
+                            userName.isNotEmpty ? userName[0].toUpperCase() : 'A',
+                            style: const TextStyle(
+                              fontSize: 36,
+                              color: Color(0xFFE64646),
+                            ),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          'Hi, $userName',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          userRole == 'admin'
+                              ? 'Administrator'
+                              : userRole == 'registrar'
+                                  ? 'Registrar'
+                                  : 'Alumni',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 15,
+                          ),
+                        ),
+                        if (isLoadingProfile)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 8),
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-                  Text(
-                    userRole == 'admin'
-                        ? 'Admin / Owner'
-                        : userRole == 'registrar'
-                            ? 'Registrar'
-                            : 'Alumni',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  if (isLoadingRole)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 12),
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                      ),
-                    ),
                 ],
               ),
             ),
 
+            _buildDrawerItem(Icons.person_outline, 'Profile', false, () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfileScreen()),
+              );
+            }),
+
+            _buildDrawerItem(Icons.home_outlined, 'Dashboard', true, null),
+
+            if (userRole == 'registrar' || userRole == 'admin') ...[
+              _buildDrawerItem(Icons.people_outline, 'Alumni Management', false, null),
+              _buildDrawerItem(Icons.school_outlined, 'Courses', false, null),
+              _buildDrawerItem(Icons.work_outline, 'Job Postings', false, null),
+              _buildDrawerItem(Icons.account_circle_outlined, 'User Accounts', false, null),
+            ],
+
             _buildDrawerItem(
-              Icons.person_outline,
-              'Profile',
+              Icons.event_outlined,
+              'Events',
               false,
-              onTap: () {
+              () {
                 Navigator.pop(context);
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                  MaterialPageRoute(builder: (_) => const EventListScreen()),
                 );
               },
             ),
 
-            _buildDrawerItem(Icons.home_outlined, 'Dashboard', true),
+            _buildDrawerItem(
+              Icons.campaign_outlined,
+              'Announcements',
+              false,
+              () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AnnouncementsScreen()),
+                );
+              },
+            ),
 
-            if (userRole == 'registrar' || userRole == 'admin') ...[
-              _buildDrawerItem(Icons.people_outline, 'Alumni Management', false),
-              _buildDrawerItem(Icons.school_outlined, 'Courses', false),
-              _buildDrawerItem(Icons.work_outline, 'Job Postings', false),
-              _buildDrawerItem(Icons.account_circle_outlined, 'User Accounts', false),
-            ],
+            _buildDrawerItem(
+              Icons.photo_library_outlined,
+              'Gallery',
+              false,
+              () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const GalleryScreen()),
+                );
+              },
+            ),
 
-            _buildDrawerItem(Icons.event_outlined, 'Events', false),
-            _buildDrawerItem(Icons.campaign_outlined, 'Announcements', false),
-            _buildDrawerItem(Icons.photo_library_outlined, 'Gallery', false),
-            _buildDrawerItem(Icons.star_outline, 'Success Stories', false),
-            _buildDrawerItem(Icons.format_quote_outlined, 'Testimonials', false),
-            _buildDrawerItem(Icons.forum_outlined, 'Forum Topics', false),
+            _buildDrawerItem(Icons.star_outline, 'Success Stories', false, null),
+            _buildDrawerItem(Icons.format_quote_outlined, 'Testimonials', false, null),
+            _buildDrawerItem(Icons.forum_outlined, 'Forum Topics', false, null),
 
             const Divider(color: Colors.white30, indent: 16, endIndent: 16),
 
-            _buildDrawerItem(Icons.logout_outlined, 'Logout', false, onTap: _logout),
+            _buildDrawerItem(Icons.logout_outlined, 'Logout', false, _logout),
           ],
         ),
       ),
 
-      body: isLoadingRole || isLoadingData
+      body: isLoadingProfile || isLoadingData
           ? const Center(child: CircularProgressIndicator(color: Color(0xFFE64646)))
           : RefreshIndicator(
               onRefresh: _loadDashboardData,
@@ -261,12 +346,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Personalized greeting
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 24),
+                      child: Text(
+                        'Welcome back, ${userName.split(' ').first}',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF2D2D2D),
+                        ),
+                      ),
+                    ),
+
                     if (errorMessage != null)
                       Padding(
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.only(bottom: 16),
                         child: Text(
                           errorMessage!,
-                          style: const TextStyle(color: Color(0xFFE64646), fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            color: Color(0xFFE64646),
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
 
@@ -290,56 +391,70 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                     const Text(
                       'Recent Announcements',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF2D2D2D),
-                        letterSpacing: 0.2,
-                      ),
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF2D2D2D)),
                     ),
                     const SizedBox(height: 12),
 
                     if (recentAnnouncements.isEmpty)
-                      const Center(child: Text('No recent announcements yet', style: TextStyle(color: Colors.grey)))
+                      const Center(
+                        child: Text(
+                          'No recent announcements yet',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      )
                     else
-                      ...recentAnnouncements.map((ann) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: _buildAnnouncementCard(
-                              ann['title'] as String? ?? 'No title',
-                              ann['content'] as String? ?? 'No content',
-                              ann['publishedAt'] is Timestamp
-                                  ? DateFormat('MMM dd, yyyy • hh:mm a').format((ann['publishedAt'] as Timestamp).toDate())
-                                  : 'N/A',
-                            ),
-                          )),
+                      ...recentAnnouncements.map(
+                        (ann) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _buildAnnouncementCard(
+                            ann['title'] as String? ?? 'No title',
+                            ann['content'] as String? ?? 'No content',
+                            ann['publishedAt'] is Timestamp
+                                ? DateFormat('MMM dd, yyyy • hh:mm a')
+                                    .format((ann['publishedAt'] as Timestamp).toDate())
+                                : 'N/A',
+                          ),
+                        ),
+                      ),
 
                     const SizedBox(height: 32),
 
                     const Text(
                       'Upcoming Events',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF2D2D2D),
-                        letterSpacing: 0.2,
-                      ),
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF2D2D2D)),
                     ),
                     const SizedBox(height: 12),
 
                     if (upcomingEvents.isEmpty)
-                      const Center(child: Text('No upcoming events found', style: TextStyle(color: Colors.grey)))
+                      const Center(
+                        child: Text(
+                          'No upcoming events found',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      )
                     else
-                      ...upcomingEvents.map((event) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
+                      ...upcomingEvents.map(
+                        (event) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: GestureDetector(
+                            onTap: () {
+                              // TODO: Navigate to event detail screen
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Opening: ${event['title']}')),
+                              );
+                            },
                             child: _buildEventCard(
                               event['title'] as String? ?? 'No title',
                               event['startDate'] is Timestamp
-                                  ? DateFormat('MMM dd, yyyy • hh:mm a').format((event['startDate'] as Timestamp).toDate())
+                                  ? DateFormat('MMM dd, yyyy • hh:mm a')
+                                      .format((event['startDate'] as Timestamp).toDate())
                                   : 'N/A',
                               Icons.event,
                               Colors.green,
                             ),
-                          )),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -347,9 +462,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildDrawerItem(IconData icon, String title, bool isSelected, {VoidCallback? onTap}) {
+  Widget _buildDrawerItem(
+    IconData icon,
+    String title,
+    bool isSelected, [
+    VoidCallback? onTap,
+  ]) {
     return ListTile(
-      leading: Icon(icon, color: isSelected ? Colors.white : Colors.white70, size: 20),
+      leading: Icon(
+        icon,
+        color: isSelected ? Colors.white : Colors.white70,
+        size: 20,
+      ),
       title: Text(
         title,
         style: TextStyle(
@@ -382,7 +506,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   color: color.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: Icon(icon, size: 32, color: color, weight: 300),
+                child: Icon(icon, size: 32, color: color),
               ),
               const SizedBox(height: 12),
               Text(
@@ -428,7 +552,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
                 color: Color(0xFF2D2D2D),
-                letterSpacing: 0.2,
               ),
             ),
             const SizedBox(height: 10),
@@ -437,7 +560,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: TextStyle(
                 fontSize: 14,
                 color: Colors.grey.shade700,
-                fontWeight: FontWeight.w400,
                 height: 1.5,
               ),
               maxLines: 2,
@@ -470,7 +592,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             color: color.withOpacity(0.12),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(icon, color: color, size: 22, weight: 300),
+          child: Icon(icon, color: color, size: 22),
         ),
         title: Text(
           title,
@@ -478,18 +600,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
             fontWeight: FontWeight.bold,
             fontSize: 15,
             color: Color(0xFF2D2D2D),
-            letterSpacing: 0.2,
           ),
         ),
         subtitle: Text(
           date,
-          style: TextStyle(
-            color: Colors.grey.shade600,
-            fontWeight: FontWeight.w500,
-            fontSize: 13,
-          ),
+          style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
         ),
-        trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Color(0xFFE64646)),
+        trailing: const Icon(
+          Icons.arrow_forward_ios,
+          size: 14,
+          color: Color(0xFFE64646),
+        ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       ),
     );
