@@ -1,7 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'firebase_options.dart';
-
+import 'package:alumni/features/auth/presentation/screens/register_screen.dart';
 import 'package:alumni/features/gallery/presentation/screens/gallery_screen.dart';
 import 'package:alumni/features/auth/presentation/screens/login_screen.dart';
 import 'package:alumni/features/dashboard/presentation/screens/dashboard_screen.dart';
@@ -137,16 +137,17 @@ class LandingPage extends StatelessWidget {
               ),
             ),
             _buildEnhancedDrawerTile(Icons.home_outlined, 'Home', () => Navigator.pop(context), isPrimary: true),
-            _buildEnhancedDrawerTile(Icons.login_outlined, 'Login', () {
-              Navigator.pop(context);
+            _buildEnhancedDrawerTile(Icons.login_outlined, 'Login', () {Navigator.pop(context);
               Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
             }),
-            _buildEnhancedDrawerTile(Icons.person_add_outlined, 'Register', () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Register coming soon")),
-              );
+
+
+            _buildEnhancedDrawerTile(Icons.person_add_outlined, 'Register', () { Navigator.pop(context);
+            Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterScreen()));
             }),
+
+
+
             const Divider(color: Colors.white30, indent: 16, endIndent: 16),
             _buildEnhancedDrawerTile(Icons.photo_library_outlined, 'Gallery', () {
               Navigator.pop(context);
@@ -212,11 +213,17 @@ class LandingPage extends StatelessWidget {
                   const SizedBox(height: 40),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
+
+
+
+
                     children: [
                       ElevatedButton(
                         onPressed: () {
                           Navigator.push(
                             context,
+
+
                             MaterialPageRoute(
                               builder: (context) => const LoginScreen(),
                             ),
@@ -229,34 +236,60 @@ class LandingPage extends StatelessWidget {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
                           elevation: 4,
                         ),
+
+
                         child: const Text(
-                          "Login",
+                          "Sign In",
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                        ),
+                      ),
+
+
+
+                      const SizedBox(width: 16),
+                        ElevatedButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+
+
+                            MaterialPageRoute(
+                              builder: (context) => const RegisterScreen(),
+                            ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFFE64646),
+                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                          elevation: 4,
+                        ),
+
+
+                        child: const Text(
+                          "Sign Up",
                           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5),
                         ),
                       ),
                       const SizedBox(width: 16),
-                      OutlinedButton(
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("Register coming soon")),
-                          );
-                        },
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.white, width: 2),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-                        ),
-                        child: const Text(
-                          "Join Now",
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                        ),
-                      ),
                     ],
+
+                    
                   ),
                 ],
               ),
             ),
+
+
+
+
+
+
+
+
+
+
             // Feature sections
             _buildSection(
               title: "Gallery",
