@@ -312,7 +312,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                         // Secure Passphrase
                         const Text(
-                          'SECURE PASSPHRASE',
+                          'SECURE PASSPWORD',
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -352,7 +352,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                         // Confirm Passphrase
                         const Text(
-                          'CONFIRM PASSPHRASE',
+                          'CONFIRM PASSWORD',
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
