@@ -5,8 +5,8 @@ import 'firebase_options.dart';
 import 'package:alumni/features/auth/presentation/screens/login_screen.dart';
 import 'package:alumni/features/auth/presentation/screens/register_screen.dart';
 import 'package:alumni/features/gallery/presentation/screens/gallery_screen.dart';
-// Adjust this import path according to where you place DashboardScreen
 import 'package:alumni/features/dashboard/presentation/screens/dashboard_screen.dart';
+import 'package:alumni/features/dashboard/presentation/screens/admin_dashboard_web.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,18 +32,19 @@ class MyApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.white,
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF9B1D1D)),
       ),
-      initialRoute: '/',
+      home: const LandingPage(), // Starts on welcome/landing page
       routes: {
-        '/': (context) => const LandingPage(),
         '/login': (context) => const LoginScreen(),
         '/register': (context) => const RegisterScreen(),
         '/gallery': (context) => const GalleryScreen(),
         '/dashboard': (context) => const DashboardScreen(),
+        '/admin': (context) => const AdminDashboardWeb(),
       },
     );
   }
 }
 
+// LandingPage (unchanged from your version)
 class LandingPage extends StatelessWidget {
   const LandingPage({super.key});
 
@@ -251,7 +252,7 @@ class LandingPage extends StatelessWidget {
                               ),
                               const SizedBox(height: 36),
                               Text(
-                                'St. Cecilias’s Alumni',
+                                'St. Cecilia’s Alumni',
                                 style: TextStyle(
                                   fontSize: isSmallScreen ? 15 : 16,
                                   color: const Color.fromARGB(255, 0, 0, 0).withOpacity(0.88),

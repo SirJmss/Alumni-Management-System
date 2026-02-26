@@ -32,89 +32,118 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  Future<void> _register() async {
-    if (!_formKey.currentState!.validate()) return;
-    if (!_acknowledgeNDA) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Please acknowledge the Non-Disclosure Agreement"),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    try {
-      // Create instances ONLY here — AFTER Firebase.initializeApp() in main()
-      final auth = FirebaseAuth.instance;
-      final firestore = FirebaseFirestore.instance;
-
-      final credential = await auth.createUserWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
-      );
-
-      final user = credential.user;
-      if (user == null) throw Exception("No user returned after registration");
-
-      // Combine first + last name for display name
-      final fullName = '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}';
-      await user.updateDisplayName(fullName);
-
-      await firestore.collection('users').doc(user.uid).set({
-        'uid': user.uid,
-        'firstName': _firstNameController.text.trim(),
-        'lastName': _lastNameController.text.trim(),
-        'name': fullName,
-        'email': user.email?.trim().toLowerCase(),
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-        'lastLogin': FieldValue.serverTimestamp(),
-        'role': 'pending',
-        'status': 'pending_review',
-      });
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Access request submitted! Awaiting committee review."),
-          backgroundColor: Colors.green,
-        ),
-      );
-
-      Navigator.pushReplacementNamed(context, '/dashboard');
-    } on FirebaseAuthException catch (e) {
-      String message = e.message ?? 'Registration failed';
-      switch (e.code) {
-        case 'email-already-in-use':
-          message = 'This email is already registered. Please sign in.';
-          break;
-        case 'weak-password':
-          message = 'Passphrase too weak. Use at least 6 characters.';
-          break;
-        case 'invalid-email':
-          message = 'Invalid professional email format.';
-          break;
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message), backgroundColor: Colors.red),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
-        );
-      }
-    }
-
-    if (mounted) setState(() => _isLoading = false);
+Future<void> _register() async {
+  if (!_formKey.currentState!.validate()) return;
+  if (!_acknowledgeNDA) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Please acknowledge the Non-Disclosure Agreement"),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return;
   }
+
+  setState(() => _isLoading = true);
+
+  try {
+    final auth = FirebaseAuth.instance;
+    final firestore = FirebaseFirestore.instance;
+
+    // 1. Create user account
+    final credential = await auth.createUserWithEmailAndPassword(
+      email: _emailController.text.trim(),
+      password: _passwordController.text.trim(),
+    );
+
+    final user = credential.user;
+    if (user == null) throw Exception("Registration failed - no user returned");
+
+    // 2. Update display name
+    final fullName = '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}';
+    await user.updateDisplayName(fullName);
+
+// 3. Save user profile with pending status
+await firestore.collection('users').doc(user.uid).set({
+  'uid': user.uid,
+  'firstName': _firstNameController.text.trim(),
+  'lastName': _lastNameController.text.trim(),
+  'name': fullName,
+  'email': user.email?.trim().toLowerCase(),
+  'createdAt': FieldValue.serverTimestamp(),
+  'updatedAt': FieldValue.serverTimestamp(),
+  'lastLogin': FieldValue.serverTimestamp(),
+
+  // ────────────────────────────────────────────────
+  // Changed: automatically set role = "alumni"
+  // status remains "pending_review" → blocks login until approved
+  // ────────────────────────────────────────────────
+  'role': 'alumni',             // ← NEW DEFAULT
+  'status': 'pending',   // keeps approval flow
+});
+
+    if (!mounted) return;
+
+    // 4. Success dialog and redirect
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Access Request Submitted'),
+        content: const Text(
+          'Your application has been received.\n\n'
+          'Our committee will review your profile.\n'
+          'You will be notified via email once approved.\n\n'
+          'Thank you for your patience.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pushReplacementNamed(context, '/login');
+            },
+            child: const Text('Return to Login'),
+          ),
+        ],
+      ),
+    );
+
+    // Clear form
+    _firstNameController.clear();
+    _lastNameController.clear();
+    _emailController.clear();
+    _passwordController.clear();
+    _confirmPasswordController.clear();
+    setState(() => _acknowledgeNDA = false);
+  } on FirebaseAuthException catch (e) {
+    String message = e.message ?? 'Registration failed';
+    switch (e.code) {
+      case 'email-already-in-use':
+        message = 'This email is already registered.';
+        break;
+      case 'weak-password':
+        message = 'Password should be at least 6 characters.';
+        break;
+      case 'invalid-email':
+        message = 'Please enter a valid email.';
+        break;
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.red),
+      );
+    }
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("An error occurred: $e"), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  if (mounted) setState(() => _isLoading = false);
+}
 
   @override
   Widget build(BuildContext context) {
@@ -190,7 +219,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          'Join our curated community. Please provide your professional\ndetails for verification.',
+                          'Join our curated community. Please provide your professional details for verification.',
                           style: TextStyle(
                             fontSize: 15,
                             color: Colors.grey.shade700,
@@ -199,110 +228,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 40),
 
-                        // First & Last Name side by side
+                        // First & Last Name
                         Row(
                           children: [
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'FIRST NAME',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      letterSpacing: 1.0,
-                                      color: Color(0xFF333333),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  TextFormField(
-                                    controller: _firstNameController,
-                                    textCapitalization: TextCapitalization.words,
-                                    decoration: InputDecoration(
-                                      hintText: 'e.g. Julian',
-                                      hintStyle: TextStyle(color: Colors.grey.shade400),
-                                      filled: true,
-                                      fillColor: const Color(0xFFFAFAFA),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                        borderSide: BorderSide.none,
-                                      ),
-                                      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-                                    ),
-                                    validator: (value) =>
-                                        value?.trim().isEmpty ?? true ? 'Required' : null,
-                                  ),
-                                ],
+                              child: _buildTextField(
+                                label: 'FIRST NAME',
+                                controller: _firstNameController,
+                                hint: 'e.g. Julian',
+                                validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null,
                               ),
                             ),
                             const SizedBox(width: 16),
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'LAST NAME',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      letterSpacing: 1.0,
-                                      color: Color(0xFF333333),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  TextFormField(
-                                    controller: _lastNameController,
-                                    textCapitalization: TextCapitalization.words,
-                                    decoration: InputDecoration(
-                                      hintText: 'e.g. Vane',
-                                      hintStyle: TextStyle(color: Colors.grey.shade400),
-                                      filled: true,
-                                      fillColor: const Color(0xFFFAFAFA),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                        borderSide: BorderSide.none,
-                                      ),
-                                      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-                                    ),
-                                    validator: (value) =>
-                                        value?.trim().isEmpty ?? true ? 'Required' : null,
-                                  ),
-                                ],
+                              child: _buildTextField(
+                                label: 'LAST NAME',
+                                controller: _lastNameController,
+                                hint: 'e.g. Vane',
+                                validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null,
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 32),
 
-                        // Professional Email
-                        const Text(
-                          'PROFESSIONAL EMAIL',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 1.0,
-                            color: Color(0xFF333333),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        TextFormField(
+                        // Email
+                        _buildTextField(
+                          label: 'PROFESSIONAL EMAIL',
                           controller: _emailController,
+                          hint: 'e.g. concierge@maison.com',
                           keyboardType: TextInputType.emailAddress,
-                          decoration: InputDecoration(
-                            hintText: 'e.g. concierge@maison.com',
-                            hintStyle: TextStyle(color: Colors.grey.shade400),
-                            filled: true,
-                            fillColor: const Color(0xFFFAFAFA),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: BorderSide.none,
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-                          ),
-                          validator: (value) {
-                            if (value?.trim().isEmpty ?? true) return 'Required';
-                            if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value!.trim())) {
+                          validator: (v) {
+                            if (v?.trim().isEmpty ?? true) return 'Required';
+                            if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(v!.trim())) {
                               return 'Invalid email';
                             }
                             return null;
@@ -310,88 +268,35 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 32),
 
-                        // Secure Passphrase
-                        const Text(
-                          'SECURE PASSPWORD',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 1.0,
-                            color: Color(0xFF333333),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        TextFormField(
+                        // Password
+                        _buildPasswordField(
+                          label: 'SECURE PASSWORD',
                           controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          decoration: InputDecoration(
-                            hintText: '••••••••••',
-                            hintStyle: TextStyle(color: Colors.grey.shade400, letterSpacing: 3),
-                            filled: true,
-                            fillColor: const Color(0xFFFAFAFA),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                                color: const Color(0xFF9B1D1D),
-                              ),
-                              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: BorderSide.none,
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-                          ),
-                          validator: (value) {
-                            if (value?.isEmpty ?? true) return 'Required';
-                            if (value!.length < 6) return 'Too short';
+                          obscure: _obscurePassword,
+                          onToggle: () => setState(() => _obscurePassword = !_obscurePassword),
+                          validator: (v) {
+                            if (v?.isEmpty ?? true) return 'Required';
+                            if (v!.length < 6) return 'Too short';
                             return null;
                           },
                         ),
                         const SizedBox(height: 32),
 
-                        // Confirm Passphrase
-                        const Text(
-                          'CONFIRM PASSWORD',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 1.0,
-                            color: Color(0xFF333333),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        TextFormField(
+                        // Confirm Password
+                        _buildPasswordField(
+                          label: 'CONFIRM PASSWORD',
                           controller: _confirmPasswordController,
-                          obscureText: _obscureConfirmPassword,
-                          decoration: InputDecoration(
-                            hintText: '••••••••••',
-                            hintStyle: TextStyle(color: Colors.grey.shade400, letterSpacing: 3),
-                            filled: true,
-                            fillColor: const Color(0xFFFAFAFA),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscureConfirmPassword ? Icons.visibility_off : Icons.visibility,
-                                color: const Color(0xFF9B1D1D),
-                              ),
-                              onPressed: () =>
-                                  setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: BorderSide.none,
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-                          ),
-                          validator: (value) {
-                            if (value?.isEmpty ?? true) return 'Required';
-                            if (value != _passwordController.text) return 'Passphrases do not match';
+                          obscure: _obscureConfirmPassword,
+                          onToggle: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                          validator: (v) {
+                            if (v?.isEmpty ?? true) return 'Required';
+                            if (v != _passwordController.text) return 'Passwords do not match';
                             return null;
                           },
                         ),
                         const SizedBox(height: 32),
 
-                        // Acknowledgment
+                        // NDA Checkbox
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -409,18 +314,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             Expanded(
                               child: const Text(
                                 'I acknowledge the Non-Disclosure Agreement and understand that membership is subject to committee review.',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Color(0xFF444444),
-                                  height: 1.4,
-                                ),
+                                style: TextStyle(fontSize: 14, color: Color(0xFF444444), height: 1.4),
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 40),
 
-                        // Request Access button
+                        // Submit Button
                         SizedBox(
                           width: double.infinity,
                           height: 56,
@@ -440,11 +341,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   )
                                 : const Text(
                                     'REQUEST ACCESS',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 1.4,
-                                    ),
+                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: 1.4),
                                   ),
                           ),
                         ),
@@ -484,6 +381,74 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildTextField({
+    required String label,
+    required TextEditingController controller,
+    required String hint,
+    TextInputType? keyboardType,
+    String? Function(String?)? validator,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 1.0, color: Color(0xFF333333)),
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: controller,
+          keyboardType: keyboardType,
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: TextStyle(color: Colors.grey.shade400),
+            filled: true,
+            fillColor: const Color(0xFFFAFAFA),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+          ),
+          validator: validator,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPasswordField({
+    required String label,
+    required TextEditingController controller,
+    required bool obscure,
+    required VoidCallback onToggle,
+    String? Function(String?)? validator,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 1.0, color: Color(0xFF333333)),
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: controller,
+          obscureText: obscure,
+          decoration: InputDecoration(
+            hintText: '••••••••••',
+            hintStyle: TextStyle(color: Colors.grey.shade400, letterSpacing: 3),
+            filled: true,
+            fillColor: const Color(0xFFFAFAFA),
+            suffixIcon: IconButton(
+              icon: Icon(obscure ? Icons.visibility_off : Icons.visibility, color: const Color(0xFF9B1D1D)),
+              onPressed: onToggle,
+            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+          ),
+          validator: validator,
+        ),
+      ],
     );
   }
 }

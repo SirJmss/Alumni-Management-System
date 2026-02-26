@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -31,10 +32,10 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Create instances ONLY here — AFTER Firebase.initializeApp() in main()
       final auth = FirebaseAuth.instance;
       final firestore = FirebaseFirestore.instance;
 
+      // 1. Sign in
       final credential = await auth.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
@@ -43,23 +44,58 @@ class _LoginScreenState extends State<LoginScreen> {
       final user = credential.user;
       if (user == null) throw Exception("Login failed - no user returned");
 
-      // Update last login (safe now)
-      await firestore.collection('users').doc(user.uid).set({
+      // 2. Check status first (block pending users)
+      final userDoc = await firestore.collection('users').doc(user.uid).get();
+
+      if (!userDoc.exists) {
+        await auth.signOut();
+        throw Exception("User profile not found.");
+      }
+
+      final userData = userDoc.data()!;
+      final status = userData['status'] as String?;
+
+      if (status == 'pending_review' || status == 'pending') {
+        await auth.signOut();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Your account is pending approval.\nPlease wait for committee review.',
+              ),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 5),
+            ),
+          );
+        }
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      // 3. Update last login
+      await firestore.collection('users').doc(user.uid).update({
         'lastLogin': FieldValue.serverTimestamp(),
-        'email': user.email?.trim().toLowerCase(),
         'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      });
 
-      if (!mounted) return;
+      // 4. Role-based navigation
+      final role = userData['role'] as String? ?? 'alumni';
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Login successful!"),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Login successful!"),
+            backgroundColor: Colors.green,
+          ),
+        );
 
-      Navigator.pushReplacementNamed(context, '/dashboard');
+        // Redirect based on role and platform
+        if (role == 'admin' && kIsWeb) {
+          Navigator.pushReplacementNamed(context, '/admin');
+        } else {
+          Navigator.pushReplacementNamed(context, '/dashboard');
+        }
+      }
     } on FirebaseAuthException catch (e) {
       String message;
       switch (e.code) {
