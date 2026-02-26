@@ -1,16 +1,20 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'firebase_options.dart';
+
+import 'package:alumni/features/auth/presentation/screens/login_screen.dart';
 import 'package:alumni/features/auth/presentation/screens/register_screen.dart';
 import 'package:alumni/features/gallery/presentation/screens/gallery_screen.dart';
-import 'package:alumni/features/auth/presentation/screens/login_screen.dart';
+// Adjust this import path according to where you place DashboardScreen
 import 'package:alumni/features/dashboard/presentation/screens/dashboard_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
   runApp(const MyApp());
 }
 
@@ -20,42 +24,20 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'St. Cecilia’s Alumni',
+      title: 'ALUMNI',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.red.shade800,
-          primary: Colors.red.shade800,
-          secondary: Colors.red.shade600,
-        ),
+        primarySwatch: Colors.red,
         useMaterial3: true,
-        fontFamily: 'Roboto',
         scaffoldBackgroundColor: Colors.white,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.red,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            foregroundColor: Colors.red,
-            side: const BorderSide(color: Colors.red),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        ),
-        textButtonTheme: TextButtonThemeData(
-          style: TextButton.styleFrom(foregroundColor: Colors.red),
-        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF9B1D1D)),
       ),
-      home: const LandingPage(),
+      initialRoute: '/',
       routes: {
+        '/': (context) => const LandingPage(),
+        '/login': (context) => const LoginScreen(),
+        '/register': (context) => const RegisterScreen(),
+        '/gallery': (context) => const GalleryScreen(),
         '/dashboard': (context) => const DashboardScreen(),
       },
     );
@@ -68,402 +50,342 @@ class LandingPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text(
-          "St. Cecilia’s Alumni",
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-        ),
-        centerTitle: true,
-        titleSpacing: 0,
-        toolbarHeight: 56,
-        backgroundColor: const Color(0xFFE64646),
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.white,
         elevation: 0,
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: const Icon(Icons.menu_outlined),
-            onPressed: () => Scaffold.of(context).openDrawer(),
+        foregroundColor: const Color(0xFF9B1D1D),
+        title: const Text(
+          'ALUMNI',
+          style: TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 5,
+            color: Color(0xFF1A1A1A),
           ),
         ),
+        centerTitle: false,
+        actions: [
+          Builder(
+            builder: (BuildContext context) => IconButton(
+              icon: const Icon(Icons.menu, size: 28, color: Color(0xFF1A1A1A)),
+              onPressed: () => Scaffold.of(context).openEndDrawer(),
+            ),
+          ),
+          const SizedBox(width: 16),
+        ],
       ),
-      drawer: Drawer(
+      endDrawer: Drawer(
         backgroundColor: Colors.white,
-        elevation: 8,
+        width: 300,
         child: ListView(
-          padding: EdgeInsets.zero,
+          padding: const EdgeInsets.fromLTRB(24, 80, 24, 24),
           children: [
-            DrawerHeader(
-              decoration: const BoxDecoration(color: Color(0xFFE64646)),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(2),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(50),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.15),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        )
-                      ],
-                    ),
-                    child: const CircleAvatar(
-                      radius: 32,
-                      backgroundColor: Colors.white,
-                      child: Icon(Icons.school_outlined, size: 40, color: Color(0xFFE64646)),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'St. Cecilia’s Alumni',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Text(
-                    'Welcome back',
-                    style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500),
-                  ),
-                ],
+            const Text(
+              'ALUMNI',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 3,
+                color: Color(0xFF1A1A1A),
               ),
             ),
-            _buildEnhancedDrawerTile(Icons.home_outlined, 'Home', () => Navigator.pop(context), isPrimary: true),
-            _buildEnhancedDrawerTile(Icons.login_outlined, 'Login', () {Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
-            }),
+            const SizedBox(height: 48),
 
-
-            _buildEnhancedDrawerTile(Icons.person_add_outlined, 'Register', () { Navigator.pop(context);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterScreen()));
-            }),
-
-
-
-            const Divider(color: Colors.white30, indent: 16, endIndent: 16),
-            _buildEnhancedDrawerTile(Icons.photo_library_outlined, 'Gallery', () {
+            _buildMenuItem('Overview', () {
               Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const GalleryScreen()),
+              Navigator.pushReplacementNamed(context, '/');
+            }),
+
+            _buildMenuItem('Collection', () {
+              Navigator.pop(context);
+              Navigator.pushNamed(context, '/gallery');
+            }),
+
+            _buildMenuItem('Help & Support', () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Help & Support – coming soon')),
               );
             }),
-            const Divider(color: Colors.white30, indent: 16, endIndent: 16),
-            _buildEnhancedDrawerTile(Icons.help_outline, 'Help & Support', () => Navigator.pop(context)),
-          ],
-        ),
-      ),
-      body: SafeArea(
-        child: ListView(
-          physics: const ClampingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(vertical: 0),
-          children: [
-            Container(
-              padding: const EdgeInsets.fromLTRB(24, 60, 24, 60),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    const Color(0xFFE64646),
-                    const Color(0xFFF06A6A),
-                  ],
-                ),
-              ),
-              child: Column(
-                children: [
-                  const Text(
-                    "Welcome Home,",
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.w300,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    "St. Cecilia’s Alumni",
-                    style: TextStyle(
-                      fontSize: 42,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    "A warm greeting that welcomes all former students back to their school community.\n"
-                    "Even after graduation, St. Cecilia’s is still your home —\n"
-                    "a place where memories, friendships, and achievements live on.",
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.white.withOpacity(0.9),
-                      height: 1.5,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 40),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
 
+            const Divider(height: 48, color: Colors.black12),
 
+            _buildMenuItem('Sign In', () {
+              Navigator.pop(context);
+              Navigator.pushNamed(context, '/login');
+            }),
 
+            _buildMenuItem('Apply Now', () {
+              Navigator.pop(context);
+              Navigator.pushNamed(context, '/register');
+            }, isAccent: true),
 
-                    children: [
-                      ElevatedButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-
-
-                            MaterialPageRoute(
-                              builder: (context) => const LoginScreen(),
-                            ),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFFE64646),
-                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-                          elevation: 4,
-                        ),
-
-
-                        child: const Text(
-                          "Sign In",
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                        ),
-                      ),
-
-
-
-                      const SizedBox(width: 16),
-                        ElevatedButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-
-
-                            MaterialPageRoute(
-                              builder: (context) => const RegisterScreen(),
-                            ),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFFE64646),
-                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-                          elevation: 4,
-                        ),
-
-
-                        child: const Text(
-                          "Sign Up",
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                    ],
-
-                    
-                  ),
-                ],
-              ),
-            ),
-
-
-
-
-
-
-
-
-
-
-            // Feature sections
-            _buildSection(
-              title: "Gallery",
-              description: "Relive special moments, school events, and alumni gatherings.",
-              icon: Icons.photo_library_outlined,
-              backgroundColor: Colors.white,
-            ),
-            _buildSection(
-              title: "Upcoming Events",
-              description: "Reunions, seminars, outreach programs — stay connected.",
-              icon: Icons.event_outlined,
-              backgroundColor: const Color(0xFFF5E6E6),
-            ),
-            _buildSection(
-              title: "About Us",
-              description: "Mission, vision, core values, and history of the alumni community.",
-              icon: Icons.info_outlined,
-              backgroundColor: Colors.white,
-            ),
-            _buildSection(
-              title: "Core Values",
-              description: "Unity • Integrity • Service • Excellence",
-              icon: Icons.favorite_outline,
-              backgroundColor: const Color(0xFFF5E6E6),
-            ),
-            _buildSection(
-              title: "News & Announcements",
-              description: "Latest updates about alumni activities and school programs.",
-              icon: Icons.campaign_outlined,
-              backgroundColor: Colors.white,
-            ),
-            _buildSection(
-              title: "Available Jobs",
-              description: "Career opportunities shared for alumni and students.",
-              icon: Icons.work_outline,
-              backgroundColor: const Color(0xFFF5E6E6),
-            ),
-            _buildSection(
-              title: "Success Stories",
-              description: "Inspiring journeys of alumni who excelled in various fields.",
-              icon: Icons.star_outline,
-              backgroundColor: Colors.white,
-            ),
-            _buildSection(
-              title: "Testimonials",
-              description: "Personal messages from alumni sharing memories and pride.",
-              icon: Icons.format_quote_outlined,
-              backgroundColor: const Color(0xFFF5E6E6),
-            ),
-            const SizedBox(height: 80),
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text(
-                "St. Cecilia’s College – Cebu, Inc.\n© ${DateTime.now().year} Alumni Community",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
-              ),
+            const Spacer(),
+            const Text(
+              'EST. 2026',
+              style: TextStyle(fontSize: 13, color: Colors.grey, letterSpacing: 2),
             ),
           ],
         ),
       ),
-    );
-  }
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isSmallScreen = constraints.maxWidth < 600;
 
-  Widget _buildSection({
-    required String title,
-    required String description,
-    IconData? icon,
-    Color? backgroundColor,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-      color: backgroundColor ?? Colors.white,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (icon != null)
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE79A9A),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFE64646).withOpacity(0.15),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  )
-                ],
-              ),
-              child: Icon(icon, size: 28, color: const Color(0xFFE64646), weight: 300),
-            ),
-          if (icon != null) const SizedBox(width: 24),
-          Expanded(
+          return SingleChildScrollView(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.2,
-                    color: Color(0xFF2D2D2D),
+                // Hero Section
+                Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isSmallScreen ? 20 : 32,
+                    vertical: isSmallScreen ? 80 : 140,
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        'EST. 2026',
+                        style: TextStyle(
+                          fontSize: 14,
+                          letterSpacing: 6,
+                          color: Colors.grey.shade600,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      Text(
+                        'St. Cecilia’s Alumni',
+                        style: TextStyle(
+                          fontSize: isSmallScreen ? 44 : 60,
+                          height: 1.05,
+                          fontWeight: FontWeight.w900,
+                          color: const Color(0xFF111111),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        'A world where the past and present converge,\nwhere the legacy of St. Cecilia’s lives on.',
+                        style: TextStyle(
+                          fontSize: isSmallScreen ? 16 : 18,
+                          color: Colors.grey.shade700,
+                          height: 1.5,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 56),
+                      SizedBox(
+                        width: 300,
+                        height: 58,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            Navigator.pushNamed(context, '/register');
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF9B1D1D),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                            elevation: 0,
+                          ),
+                          child: const Text(
+                            'APPLY NOW',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.6,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 28),
+                      TextButton(
+                        onPressed: () {},
+                        child: const Text(
+                          'LEARN MORE',
+                          style: TextStyle(
+                            color: Color(0xFF9B1D1D),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  description,
-                  style: TextStyle(
-                    fontSize: 15,
-                    height: 1.6,
-                    color: Colors.grey.shade700,
-                    fontWeight: FontWeight.w400,
-                    letterSpacing: 0.1,
+
+                // Quote + Image Section
+                SizedBox(
+                  height: isSmallScreen ? 420 : 520,
+                  width: double.infinity,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.asset(
+                        'assets/images/gallery/building.jpg',
+                        fit: BoxFit.cover,
+                        opacity: const AlwaysStoppedAnimation(0.65),
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Center(
+                            child: Icon(Icons.broken_image, color: Colors.red, size: 80),
+                          );
+                        },
+                      ),
+                      Center(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: isSmallScreen ? 24 : 40),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                '"Exclusivity is not about excluding others;\nit’s about including the right moments."',
+                                style: TextStyle(
+                                  fontSize: isSmallScreen ? 22 : 28,
+                                  height: 1.45,
+                                  fontWeight: FontWeight.w500,
+                                  color: const Color.fromARGB(255, 0, 0, 0),
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 36),
+                              Text(
+                                'St. Cecilias’s Alumni',
+                                style: TextStyle(
+                                  fontSize: isSmallScreen ? 15 : 16,
+                                  color: const Color.fromARGB(255, 0, 0, 0).withOpacity(0.88),
+                                  height: 1.7,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Apply Section
+                Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isSmallScreen ? 24 : 32,
+                    vertical: isSmallScreen ? 80 : 120,
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        'Access the\nInaccessible.',
+                        style: TextStyle(
+                          fontSize: isSmallScreen ? 38 : 48,
+                          height: 1.1,
+                          fontWeight: FontWeight.w900,
+                          color: const Color(0xFF111111),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        'CONNECT WITH THE PAST, PRESENT, AND FUTURE OF ST. CECILIA’S THROUGH EXCLUSIVE ACCESS TO EVENTS, RESOURCES, AND A VIBRANT COMMUNITY OF ALUMNI.',
+                        style: TextStyle(
+                          fontSize: isSmallScreen ? 16 : 18,
+                          color: Colors.grey.shade700,
+                          height: 1.6,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 48),
+                      SizedBox(
+                        width: 300,
+                        height: 58,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            Navigator.pushNamed(context, '/register');
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF9B1D1D),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                            elevation: 0,
+                          ),
+                          child: const Text(
+                            'CONNECT WITH US',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Footer
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 80, horizontal: 32),
+                  color: Colors.black,
+                  child: Column(
+                    children: [
+                      const Text(
+                        'ALUMNI',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 4,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'CONNECTING THE PAST, PRESENT, AND FUTURE OF ST. CECILIA’S',
+                        style: TextStyle(fontSize: 13, color: Colors.grey.shade400, letterSpacing: 2),
+                      ),
+                      const SizedBox(height: 48),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 32,
+                        runSpacing: 16,
+                        children: const [
+                          Text('SOCIAL', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          Text('INSTAGRAM', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          Text('CONCIERGE', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          Text('JOURNAL', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          Text('PRIVACY', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                          Text('SUPPORT', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        ],
+                      ),
+                      const SizedBox(height: 48),
+                      Text(
+                        '© ${DateTime.now().year} ALUMNI — All Rights Reserved',
+                        style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildEnhancedDrawerTile(
-    IconData icon,
-    String label,
-    VoidCallback onTap, {
-    bool isPrimary = false,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        splashColor: const Color(0xFFE64646).withOpacity(0.1),
-        highlightColor: const Color(0xFFE64646).withOpacity(0.05),
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          decoration: BoxDecoration(
-            color: isPrimary ? const Color(0xFFF5E6E6) : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: ListTile(
-            leading: Icon(
-              icon,
-              color: isPrimary ? const Color(0xFFE64646) : Colors.grey.shade700,
-              size: 22,
-              weight: 300,
-            ),
-            title: Text(
-              label,
-              style: TextStyle(
-                color: isPrimary ? const Color(0xFFE64646) : Colors.grey.shade800,
-                fontSize: 15,
-                fontWeight: isPrimary ? FontWeight.bold : FontWeight.w500,
-                letterSpacing: 0.2,
-              ),
-            ),
-            trailing: isPrimary
-                ? Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE64646),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Icon(Icons.check, size: 14, color: Colors.white),
-                  )
-                : null,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            visualDensity: VisualDensity.compact,
-          ),
+  Widget _buildMenuItem(String title, VoidCallback onTap, {bool isAccent = false}) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      minVerticalPadding: 16,
+      title: Text(
+        title,
+        style: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          color: isAccent ? const Color(0xFF9B1D1D) : const Color(0xFF1A1A1A),
         ),
       ),
+      onTap: onTap,
     );
   }
 }

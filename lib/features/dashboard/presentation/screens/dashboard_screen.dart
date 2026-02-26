@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'package:alumni/features/profile/presentation/screens/profile_screen.dart';
 import 'package:alumni/features/event/presentation/screens/event_list_screen.dart';
@@ -22,7 +23,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? userPhotoUrl;
   bool isLoadingProfile = true;
 
-  // Dashboard stats & lists
+  // Real analytics from Firestore
   int totalAlumni = 0;
   int upcomingEventsCount = 0;
   int announcementsCount = 0;
@@ -30,9 +31,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   List<Map<String, dynamic>> recentAnnouncements = [];
   List<Map<String, dynamic>> upcomingEvents = [];
+  List<Map<String, dynamic>> recentAcquisitions = [];
+  Map<String, dynamic>? conciergeData;
 
   bool isLoadingData = true;
   String? errorMessage;
+
+  // Colors
+  final brandRed = const Color(0xFF991B1B);
+  final softWhite = const Color(0xFFFAFAFA);
+  final darkText = const Color(0xFF1A1A1A);
+  final mutedText = const Color(0xFF6B7280);
 
   @override
   void initState() {
@@ -50,25 +59,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     try {
       final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      if (doc.exists) {
+      if (doc.exists && mounted) {
         final data = doc.data()!;
-        if (mounted) {
-          setState(() {
-            userRole = data['role'] as String? ?? 'alumni';
-            userName = data['fullName'] as String? ??
-                data['name'] as String? ??
-                user.displayName ??
-                'Member';
-            userPhotoUrl = data['photoUrl'] as String? ?? user.photoURL;
-          });
-        }
+        setState(() {
+          userRole = data['role'] as String? ?? 'alumni';
+          userName = (data['fullName'] as String? ??
+                  data['name'] as String? ??
+                  user.displayName ??
+                  user.email?.split('@').first ??
+                  'Member')
+              .trim();
+          userPhotoUrl = data['photoUrl'] as String? ?? user.photoURL;
+        });
       }
     } catch (e) {
       debugPrint('Profile load error: $e');
-      // silent fallback - keep defaults
+    } finally {
+      if (mounted) setState(() => isLoadingProfile = false);
     }
-
-    if (mounted) setState(() => isLoadingProfile = false);
   }
 
   Future<void> _loadDashboardData() async {
@@ -83,34 +91,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final firestore = FirebaseFirestore.instance;
       final now = Timestamp.now();
 
-      // Parallel fetches for better performance
+      // Parallel queries for performance
       final results = await Future.wait([
-        // 0: total alumni
+        // 1. Total Alumni count
         firestore.collection('users').count().get(),
-        // 1: upcoming events
+        // 2. Upcoming Events (count + last 5)
         firestore
             .collection('events')
             .where('startDate', isGreaterThan: now)
             .orderBy('startDate')
             .limit(5)
             .get(),
-        // 2: announcements count
+        // 3. Total Announcements
         firestore.collection('announcements').count().get(),
-        // 3: recent announcements
+        // 4. Recent Announcements (last 3)
         firestore
             .collection('announcements')
             .orderBy('publishedAt', descending: true)
             .limit(3)
             .get(),
-        // 4: courses count
+        // 5. Courses count
         firestore.collection('courses').count().get(),
+        // 6. Recent Acquisitions (last 3)
+        firestore
+            .collection('acquisitions')
+            .orderBy('createdAt', descending: true)
+            .limit(3)
+            .get(),
+        // 7. Active Concierge request (latest one)
+        firestore
+            .collection('concierge_requests')
+            .where('status', isEqualTo: 'ACTIVE')
+            .orderBy('createdAt', descending: true)
+            .limit(1)
+            .get(),
       ]);
 
       if (!mounted) return;
 
       setState(() {
+        // Stats
         totalAlumni = (results[0] as AggregateQuerySnapshot).count ?? 0;
+        announcementsCount = (results[2] as AggregateQuerySnapshot).count ?? 0;
+        coursesCount = (results[4] as AggregateQuerySnapshot).count ?? 0;
 
+        // Upcoming Events
         final eventsSnap = results[1] as QuerySnapshot;
         upcomingEventsCount = eventsSnap.size;
         upcomingEvents = eventsSnap.docs.map((doc) {
@@ -124,8 +149,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           };
         }).toList();
 
-        announcementsCount = (results[2] as AggregateQuerySnapshot).count ?? 0;
-
+        // Recent Announcements
         final annSnap = results[3] as QuerySnapshot;
         recentAnnouncements = annSnap.docs.map((doc) {
           final data = doc.data() as Map<String, dynamic>;
@@ -137,324 +161,185 @@ class _DashboardScreenState extends State<DashboardScreen> {
           };
         }).toList();
 
-        coursesCount = (results[4] as AggregateQuerySnapshot).count ?? 0;
+        // Recent Acquisitions
+        final acqSnap = results[5] as QuerySnapshot;
+        recentAcquisitions = acqSnap.docs.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return {
+            'title': data['title'] as String? ?? 'Untitled Acquisition',
+            'description': data['description'] as String? ?? '',
+            'date': data['date'] as String? ?? '',
+            'status': data['status'] as String? ?? 'PENDING',
+          };
+        }).toList();
+
+        // Private Concierge (latest active)
+        final concSnap = results[6] as QuerySnapshot;
+        if (concSnap.docs.isNotEmpty) {
+          final data = concSnap.docs.first.data() as Map<String, dynamic>;
+          conciergeData = {
+            'assistant': data['assistant'] as String? ?? 'ELENA',
+            'message': data['message'] as String? ?? 'No active request.',
+            'status': data['status'] as String? ?? 'ACTIVE',
+            'actionText': data['actionText'] as String? ?? 'CONFIRM DETAILS',
+          };
+        } else {
+          conciergeData = {
+            'assistant': 'None',
+            'message': 'No active concierge requests at this time.',
+            'status': 'INACTIVE',
+            'actionText': 'REQUEST ASSISTANCE',
+          };
+        }
 
         isLoadingData = false;
       });
     } catch (e) {
+      debugPrint('Dashboard data load error: $e');
       if (mounted) {
         setState(() {
-          errorMessage = 'Failed to load dashboard data. Please try again.';
+          errorMessage = 'Failed to load dashboard data. Please try again later.';
           isLoadingData = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage!),
-            backgroundColor: const Color(0xFFE64646),
-          ),
-        );
       }
     }
   }
 
   Future<void> _logout() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showGeneralDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to log out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text(
-              'Logout',
-              style: TextStyle(color: Color(0xFFE64646)),
+      barrierDismissible: true,
+      barrierLabel: '',
+      pageBuilder: (context, anim1, anim2) => Container(),
+      transitionBuilder: (context, anim1, anim2, child) {
+        return ScaleTransition(
+          scale: anim1,
+          child: AlertDialog(
+            backgroundColor: Colors.white,
+            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            title: Text(
+              'LOGOUT',
+              style: GoogleFonts.inter(letterSpacing: 4, fontSize: 16, fontWeight: FontWeight.bold),
             ),
+            content: Text(
+              'Are you sure you want to exit the sanctuary?',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w400, fontSize: 15),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text('CANCEL', style: TextStyle(color: mutedText, fontSize: 14)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(
+                  'LOGOUT',
+                  style: TextStyle(color: brandRed, fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
 
     if (confirmed == true) {
       await FirebaseAuth.instance.signOut();
-      if (mounted) Navigator.pushReplacementNamed(context, '/');
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/');
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFE6D3AE),
+      backgroundColor: softWhite,
       appBar: AppBar(
-        title: const Text(
-          'Dashboard',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+        title: Text(
+          'DASHBOARD',
+          style: GoogleFonts.cormorantGaramond(
+            fontWeight: FontWeight.w400,
+            fontSize: 26,
+            letterSpacing: 6,
+            color: brandRed,
+          ),
         ),
-        backgroundColor: const Color(0xFFE64646),
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.white,
+        foregroundColor: darkText,
         elevation: 0,
         centerTitle: true,
-      ),
-      drawer: Drawer(
-        backgroundColor: const Color(0xFFE64646),
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            DrawerHeader(
-              decoration: const BoxDecoration(color: Color(0xFFE64646)),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 36,
-                    backgroundColor: Colors.white,
-                    backgroundImage:
-                        userPhotoUrl != null ? NetworkImage(userPhotoUrl!) : null,
-                    child: userPhotoUrl == null
-                        ? Text(
-                            userName.isNotEmpty ? userName[0].toUpperCase() : 'A',
-                            style: const TextStyle(
-                              fontSize: 36,
-                              color: Color(0xFFE64646),
-                            ),
-                          )
-                        : null,
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'Hi, $userName',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          userRole == 'admin'
-                              ? 'Administrator'
-                              : userRole == 'registrar'
-                                  ? 'Registrar'
-                                  : 'Alumni',
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 15,
-                          ),
-                        ),
-                        if (isLoadingProfile)
-                          const Padding(
-                            padding: EdgeInsets.only(top: 8),
-                            child: SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            _buildDrawerItem(Icons.person_outline, 'Profile', false, () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ProfileScreen()),
-              );
-            }),
-
-            _buildDrawerItem(Icons.home_outlined, 'Dashboard', true, null),
-
-            if (userRole == 'registrar' || userRole == 'admin') ...[
-              _buildDrawerItem(Icons.people_outline, 'Alumni Management', false, null),
-              _buildDrawerItem(Icons.school_outlined, 'Courses', false, null),
-              _buildDrawerItem(Icons.work_outline, 'Job Postings', false, null),
-              _buildDrawerItem(Icons.account_circle_outlined, 'User Accounts', false, null),
-            ],
-
-            _buildDrawerItem(
-              Icons.event_outlined,
-              'Events',
-              false,
-              () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const EventListScreen()),
-                );
-              },
-            ),
-
-            _buildDrawerItem(
-              Icons.campaign_outlined,
-              'Announcements',
-              false,
-              () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AnnouncementsScreen()),
-                );
-              },
-            ),
-
-            _buildDrawerItem(
-              Icons.photo_library_outlined,
-              'Gallery',
-              false,
-              () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const GalleryScreen()),
-                );
-              },
-            ),
-
-            _buildDrawerItem(Icons.star_outline, 'Success Stories', false, null),
-            _buildDrawerItem(Icons.format_quote_outlined, 'Testimonials', false, null),
-            _buildDrawerItem(Icons.forum_outlined, 'Forum Topics', false, null),
-
-            const Divider(color: Colors.white30, indent: 16, endIndent: 16),
-
-            _buildDrawerItem(Icons.logout_outlined, 'Logout', false, _logout),
-          ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(color: Colors.grey.withOpacity(0.15), height: 1),
         ),
       ),
-
+      drawer: _buildMaisonDrawer(),
       body: isLoadingProfile || isLoadingData
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFFE64646)))
+          ? Center(child: CircularProgressIndicator(color: brandRed, strokeWidth: 2))
           : RefreshIndicator(
               onRefresh: _loadDashboardData,
-              color: const Color(0xFFE64646),
+              color: brandRed,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(18),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Personalized greeting
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 24),
-                      child: Text(
-                        'Welcome back, ${userName.split(' ').first}',
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF2D2D2D),
-                        ),
+                    Text(
+                      'Good Evening, ${userName.split(' ').first}.',
+                      style: GoogleFonts.cormorantGaramond(
+                        fontSize: 36,
+                        fontWeight: FontWeight.w500,
+                        fontStyle: FontStyle.italic,
+                        color: darkText,
                       ),
                     ),
-
-                    if (errorMessage != null)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: Text(
-                          errorMessage!,
-                          style: const TextStyle(
-                            color: Color(0xFFE64646),
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'YOUR PRIVATE SANCTUARY DASHBOARD',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        letterSpacing: 3,
+                        fontWeight: FontWeight.w500,
+                        color: mutedText,
                       ),
-
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _buildStatCard('TOTAL ALUMNI', totalAlumni.toString(), Icons.people, Colors.blue),
-                        _buildStatCard('UPCOMING EVENTS', upcomingEventsCount.toString(), Icons.event, Colors.green),
-                      ],
                     ),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    const SizedBox(height: 40),
+
+                    if (errorMessage != null) _buildErrorMessage(),
+
+                    GridView.count(
+                      crossAxisCount: 2,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      mainAxisSpacing: 20,
+                      crossAxisSpacing: 20,
+                      childAspectRatio: 1.05,
                       children: [
-                        _buildStatCard('ANNOUNCEMENTS', announcementsCount.toString(), Icons.campaign, Colors.purple),
-                        _buildStatCard('COURSES', coursesCount.toString(), Icons.school, Colors.orange),
+                        _buildMaisonStatCard('TOTAL ALUMNI', totalAlumni.toString(), null),
+                        _buildMaisonStatCard('UPCOMING EVENTS', upcomingEventsCount.toString(), null),
+                        _buildMaisonStatCard('ANNOUNCEMENTS', announcementsCount.toString(), null),
+                        _buildMaisonStatCard('COURSES', coursesCount.toString(), null),
                       ],
                     ),
 
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 48),
 
-                    const Text(
-                      'Recent Announcements',
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF2D2D2D)),
-                    ),
-                    const SizedBox(height: 12),
-
-                    if (recentAnnouncements.isEmpty)
-                      const Center(
-                        child: Text(
-                          'No recent announcements yet',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      )
+                    _buildSectionHeader('Recent Acquisitions', '/gallery'),
+                    const SizedBox(height: 20),
+                    if (recentAcquisitions.isEmpty)
+                      _buildEmptyState('No recent acquisitions in the vault.')
                     else
-                      ...recentAnnouncements.map(
-                        (ann) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _buildAnnouncementCard(
-                            ann['title'] as String? ?? 'No title',
-                            ann['content'] as String? ?? 'No content',
-                            ann['publishedAt'] is Timestamp
-                                ? DateFormat('MMM dd, yyyy • hh:mm a')
-                                    .format((ann['publishedAt'] as Timestamp).toDate())
-                                : 'N/A',
-                          ),
-                        ),
-                      ),
+                      ...recentAcquisitions.map((acq) => _buildMaisonAcquisitionCard(acq)),
 
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 48),
 
-                    const Text(
-                      'Upcoming Events',
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF2D2D2D)),
-                    ),
-                    const SizedBox(height: 12),
+                    _buildSectionHeader('Private Concierge', '/concierge'),
+                    const SizedBox(height: 20),
+                    _buildConciergeCard(),
 
-                    if (upcomingEvents.isEmpty)
-                      const Center(
-                        child: Text(
-                          'No upcoming events found',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      )
-                    else
-                      ...upcomingEvents.map(
-                        (event) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: GestureDetector(
-                            onTap: () {
-                              // TODO: Navigate to event detail screen
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Opening: ${event['title']}')),
-                              );
-                            },
-                            child: _buildEventCard(
-                              event['title'] as String? ?? 'No title',
-                              event['startDate'] is Timestamp
-                                  ? DateFormat('MMM dd, yyyy • hh:mm a')
-                                      .format((event['startDate'] as Timestamp).toDate())
-                                  : 'N/A',
-                              Icons.event,
-                              Colors.green,
-                            ),
-                          ),
-                        ),
-                      ),
+                    const SizedBox(height: 60),
                   ],
                 ),
               ),
@@ -462,156 +347,390 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildDrawerItem(
-    IconData icon,
-    String title,
-    bool isSelected, [
-    VoidCallback? onTap,
-  ]) {
-    return ListTile(
-      leading: Icon(
-        icon,
-        color: isSelected ? Colors.white : Colors.white70,
-        size: 20,
-      ),
-      title: Text(
-        title,
-        style: TextStyle(
-          color: isSelected ? Colors.white : Colors.white70,
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-          fontSize: 15,
-          letterSpacing: 0.2,
-        ),
-      ),
-      selected: isSelected,
-      selectedTileColor: const Color(0xFFF06A6A),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-      onTap: onTap ?? () => Navigator.pop(context),
-    );
-  }
-
-  Widget _buildStatCard(String title, String count, IconData icon, Color color) {
-    return Expanded(
-      child: Card(
-        elevation: 2,
-        shadowColor: color.withOpacity(0.2),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(icon, size: 32, color: color),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                count,
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                  letterSpacing: 0.2,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey.shade700,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.1,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
+  Widget _buildSectionHeader(String title, String route) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          title.toUpperCase(),
+          style: GoogleFonts.inter(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 2.5,
+            color: darkText,
           ),
         ),
-      ),
+        TextButton(
+          onPressed: () {
+            // TODO: Add real navigation based on route
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Navigating to $title')),
+            );
+          },
+          child: Text(
+            'VIEW ALL',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              letterSpacing: 2,
+              fontWeight: FontWeight.bold,
+              color: brandRed,
+            ),
+          ),
+        )
+      ],
     );
   }
 
-  Widget _buildAnnouncementCard(String title, String content, String date) {
-    return Card(
-      elevation: 2,
-      shadowColor: Colors.black.withOpacity(0.08),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF2D2D2D),
+  Widget _buildMaisonStatCard(String title, String count, String? subValue) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE5E5E5), width: 1),
+        borderRadius: BorderRadius.circular(0),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+      // center content so value sits roughly mid-card when there's no subtext
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // title should never overflow; shrink if needed
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                title,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  letterSpacing: 2,
+                  color: mutedText,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
               ),
             ),
-            const SizedBox(height: 10),
-            Text(
-              content,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey.shade700,
-                height: 1.5,
+          ),
+          const SizedBox(height: 12),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                count,
+                style: GoogleFonts.cormorantGaramond(
+                  fontSize: 38,
+                  fontWeight: FontWeight.w400,
+                  color: darkText,
+                ),
+                maxLines: 1,
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(height: 10),
-            Text(
-              date,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade500,
-                fontWeight: FontWeight.w500,
+          ),
+          if (subValue != null) ...[
+            const SizedBox(height: 4),
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  subValue,
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: brandRed,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1,
+                  ),
+                  maxLines: 1,
+                ),
               ),
             ),
           ],
-        ),
+        ],
       ),
     );
   }
 
-  Widget _buildEventCard(String title, String date, IconData icon, Color color) {
-    return Card(
-      elevation: 2,
-      shadowColor: color.withOpacity(0.15),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: ListTile(
-        leading: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(12),
+  Widget _buildMaisonAcquisitionCard(Map<String, dynamic> data) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE5E5E5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  data['title'] ?? 'Acquisition',
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: darkText,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                data['status'] ?? 'PENDING',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: data['status'] == 'SECURED' ? Colors.green : brandRed,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
-          child: Icon(icon, color: color, size: 22),
-        ),
-        title: Text(
-          title,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 15,
-            color: Color(0xFF2D2D2D),
+          const SizedBox(height: 12),
+          Text(
+            data['description'] ?? '',
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: mutedText,
+              height: 1.6,
+            ),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
           ),
+          const SizedBox(height: 16),
+          Text(
+            data['date'] ?? '',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: mutedText,
+              letterSpacing: 1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConciergeCard() {
+    final assistant = conciergeData?['assistant'] ?? 'None';
+    final message = conciergeData?['message'] ?? 'No active request.';
+    final status = conciergeData?['status'] ?? 'INACTIVE';
+    final actionText = conciergeData?['actionText'] ?? 'REQUEST ASSISTANCE';
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE5E5E5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Private Concierge',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: darkText,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: brandRed.withOpacity(0.1),
+                ),
+                child: Text(
+                  status.toUpperCase(),
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: status == 'ACTIVE' ? brandRed : mutedText,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'ASSISTANT $assistant',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: mutedText,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: darkText,
+              height: 1.6,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            decoration: BoxDecoration(
+              color: brandRed,
+            ),
+            child: Text(
+              actionText,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+                letterSpacing: 1,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMaisonDrawer() {
+    return Drawer(
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(24, 80, 24, 40),
+            width: double.infinity,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'ALUMNI',
+                  style: GoogleFonts.cormorantGaramond(
+                    letterSpacing: 8,
+                    fontSize: 28,
+                    color: brandRed,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 28,
+                      backgroundColor: brandRed,
+                      backgroundImage: userPhotoUrl != null ? NetworkImage(userPhotoUrl!) : null,
+                      child: userPhotoUrl == null
+                          ? Text(
+                              userName.isNotEmpty ? userName[0].toUpperCase() : 'A',
+                              style: const TextStyle(color: Colors.white, fontSize: 28),
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 20),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          userName,
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 18,
+                            color: darkText,
+                          ),
+                        ),
+                        Text(
+                          userRole.toUpperCase(),
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            letterSpacing: 1.5,
+                            color: mutedText,
+                          ),
+                        ),
+                      ],
+                    )
+                  ],
+                )
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              children: [
+                _drawerTile(Icons.grid_view, 'OVERVIEW', true, null),
+                _drawerTile(Icons.person_outline, 'PROFILE', false, () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
+                }),
+                _drawerTile(Icons.event_note_outlined, 'EVENTS', false, () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const EventListScreen()));
+                }),
+                _drawerTile(Icons.campaign_outlined, 'ANNOUNCEMENTS', false, () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const AnnouncementsScreen()));
+                }),
+                _drawerTile(Icons.photo_album_outlined, 'GALLERY', false, () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const GalleryScreen()));
+                }),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+                  child: Divider(thickness: 0.5),
+                ),
+                _drawerTile(Icons.logout, 'LOGOUT', false, _logout),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _drawerTile(IconData icon, String title, bool active, VoidCallback? onTap) {
+    return ListTile(
+      leading: Icon(icon, size: 22, color: active ? brandRed : darkText),
+      title: Text(
+        title,
+        style: GoogleFonts.inter(
+          fontSize: 14,
+          letterSpacing: 1.5,
+          fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+          color: active ? brandRed : darkText,
         ),
-        subtitle: Text(
-          date,
-          style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+      ),
+      onTap: onTap,
+    );
+  }
+
+  Widget _buildErrorMessage() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 24),
+      decoration: BoxDecoration(border: Border.all(color: brandRed.withOpacity(0.3))),
+      child: Text(
+        errorMessage!,
+        style: GoogleFonts.inter(color: brandRed, fontSize: 14, fontWeight: FontWeight.w500),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(String message) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 48),
+        child: Text(
+          message,
+          style: GoogleFonts.cormorantGaramond(
+            fontStyle: FontStyle.italic,
+            color: mutedText,
+            fontSize: 18,
+          ),
+          textAlign: TextAlign.center,
         ),
-        trailing: const Icon(
-          Icons.arrow_forward_ios,
-          size: 14,
-          color: Color(0xFFE64646),
-        ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       ),
     );
   }

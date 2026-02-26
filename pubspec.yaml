@@ -1,8 +1,6 @@
 name: alumni
 description: "A new Flutter project."
-
 publish_to: 'none'
-
 version: 1.0.0+1
 
 environment:
@@ -14,34 +12,26 @@ dependencies:
 
   cupertino_icons: ^1.0.8
 
-  # Firebase packages
-  firebase_core: ^3.15.2
-  firebase_auth: ^5.3.1
-  cloud_firestore: ^5.4.4
-  firebase_storage: ^12.3.3
+  # Firebase packages - Matching current stable versions
+  firebase_core: ^3.1.1
+  firebase_auth: ^5.1.1
+  cloud_firestore: ^5.0.2
+  firebase_storage: ^12.1.0
+  google_fonts: ^6.2.1
 
-  # Date formatting (useful for profile/dashboard dates)
+  # Date formatting
   intl: ^0.19.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  flutter_lints: ^6.0.0
+  flutter_lints: ^3.0.0
 
 flutter:
   uses-material-design: true
 
   assets:
-    - assets/images/gallery/      # ← this includes pic1.png, pic2.jpg, pic3.jpg etc.
-
-  # If you later add more folders or single files, you can do:
-  # - assets/images/logo.png
-  # - assets/icons/
-
-  # fonts:  (uncomment and customize when needed)
-  #   - family: Schyler
-  #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
-  #         style: italic
+    # To include all images in a folder, just list the folder path with a slash
+    - assets/images/gallery/
+    # If building.jpg is a specific file you want to reference:
+    - assets/images/gallery/building.jpg
