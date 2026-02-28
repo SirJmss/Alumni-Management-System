@@ -1,12 +1,13 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'firebase_options.dart';
-
+import 'package:alumni/features/admin/presentation/screens/growth_metrics_screen.dart';
 import 'package:alumni/features/auth/presentation/screens/login_screen.dart';
 import 'package:alumni/features/auth/presentation/screens/register_screen.dart';
 import 'package:alumni/features/gallery/presentation/screens/gallery_screen.dart';
 import 'package:alumni/features/dashboard/presentation/screens/dashboard_screen.dart';
 import 'package:alumni/features/dashboard/presentation/screens/admin_dashboard_web.dart';
+import 'package:alumni/features/admin/presentation/screens/user_verification_moderation_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,6 +40,8 @@ class MyApp extends StatelessWidget {
         '/gallery': (context) => const GalleryScreen(),
         '/dashboard': (context) => const DashboardScreen(),
         '/admin': (context) => const AdminDashboardWeb(),
+        '/growth_metrics': (context) => const GrowthMetricsScreen(),
+        '/user_verification_moderation': (context) => const UserVerificationScreen(),
       },
     );
   }

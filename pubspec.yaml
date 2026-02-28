@@ -1,5 +1,5 @@
 name: alumni
-description: "A new Flutter project."
+description: "Alumni Management System - Flutter App"
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -10,28 +10,30 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # UI & icons
   cupertino_icons: ^1.0.8
-
-  # Firebase packages - Matching current stable versions
-  firebase_core: ^3.1.1
-  firebase_auth: ^5.1.1
-  cloud_firestore: ^5.0.2
-  firebase_storage: ^12.1.0
   google_fonts: ^6.2.1
 
-  # Date formatting
+  # Firebase (use latest stable versions as of early 2025)
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.1
+  cloud_firestore: ^5.4.4
+  firebase_storage: ^12.3.3
+
+  # Date & formatting
   intl: ^0.19.0
+
+  # Charts
+  fl_chart: ^0.68.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
+  flutter_lints: ^4.0.0
 
 flutter:
   uses-material-design: true
 
   assets:
-    # To include all images in a folder, just list the folder path with a slash
+    - assets/images/
     - assets/images/gallery/
-    # If building.jpg is a specific file you want to reference:
-    - assets/images/gallery/building.jpg
