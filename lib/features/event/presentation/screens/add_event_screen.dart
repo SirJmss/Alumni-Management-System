@@ -1,6 +1,11 @@
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 class AddEventScreen extends StatefulWidget {
@@ -20,8 +25,17 @@ class _AddEventScreenState extends State<AddEventScreen> {
   DateTime? _startDateTime;
   DateTime? _endDateTime;
 
+  File? _selectedImage;
+  String? _imageUrl;
   bool _isLoading = false;
   String? _userRole;
+
+  final backgroundCream = const Color(0xFFFAF7F2);
+  final textDark = const Color(0xFF1A1C35);
+  final textSecondary = const Color(0xFF5F6368);
+  final primaryRed = const Color(0xFFB22222);
+
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
@@ -46,7 +60,10 @@ class _AddEventScreenState extends State<AddEventScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Error loading role: $e'),
+            backgroundColor: primaryRed,
+          ),
         );
       }
     }
@@ -54,21 +71,61 @@ class _AddEventScreenState extends State<AddEventScreen> {
 
   bool get _isModeratorOrAdmin => _userRole == 'admin' || _userRole == 'moderator';
 
+  Future<void> _pickImage() async {
+    final XFile? pickedFile = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+      maxWidth: 1024,
+      maxHeight: 1024,
+    );
+
+    if (pickedFile != null && mounted) {
+      setState(() {
+        _selectedImage = File(pickedFile.path);
+      });
+    }
+  }
+
+  Future<String?> _uploadImage(File imageFile) async {
+    try {
+      final userId = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
+      final fileName = 'event_images/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+      final ref = FirebaseStorage.instance.ref().child(fileName);
+      final uploadTask = ref.putFile(imageFile);
+
+      final snapshot = await uploadTask.whenComplete(() {});
+      final downloadUrl = await snapshot.ref.getDownloadURL();
+
+      return downloadUrl;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Image upload failed: $e'),
+            backgroundColor: primaryRed,
+          ),
+        );
+      }
+      return null;
+    }
+  }
+
   Future<void> _pickDateTime(bool isStart) async {
     final DateTime? pickedDate = await showDatePicker(
       context: context,
       initialDate: DateTime.now(),
       firstDate: DateTime.now(),
       lastDate: DateTime(2030),
-      builder: (context, child) {
-        return Theme(
-          data: ThemeData.light().copyWith(
-            colorScheme: const ColorScheme.light(primary: Color(0xFFE64646)),
-            buttonTheme: const ButtonThemeData(textTheme: ButtonTextTheme.primary),
+      builder: (context, child) => Theme(
+        data: ThemeData.light().copyWith(
+          colorScheme: ColorScheme.light(primary: primaryRed),
+          textButtonTheme: TextButtonThemeData(
+            style: TextButton.styleFrom(foregroundColor: primaryRed),
           ),
-          child: child!,
-        );
-      },
+        ),
+        child: child!,
+      ),
     );
 
     if (pickedDate == null || !mounted) return;
@@ -76,14 +133,15 @@ class _AddEventScreenState extends State<AddEventScreen> {
     final TimeOfDay? pickedTime = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.now(),
-      builder: (context, child) {
-        return Theme(
-          data: ThemeData.light().copyWith(
-            colorScheme: const ColorScheme.light(primary: Color(0xFFE64646)),
+      builder: (context, child) => Theme(
+        data: ThemeData.light().copyWith(
+          colorScheme: ColorScheme.light(primary: primaryRed),
+          textButtonTheme: TextButtonThemeData(
+            style: TextButton.styleFrom(foregroundColor: primaryRed),
           ),
-          child: child!,
-        );
-      },
+        ),
+        child: child!,
+      ),
     );
 
     if (pickedTime == null || !mounted) return;
@@ -97,44 +155,28 @@ class _AddEventScreenState extends State<AddEventScreen> {
     );
 
     setState(() {
-      if (isStart) {
-        _startDateTime = combined;
-      } else {
-        _endDateTime = combined;
-      }
+      if (isStart) _startDateTime = combined;
+      else _endDateTime = combined;
     });
   }
 
   String _formatDateTime(DateTime? dt) {
     if (dt == null) return 'Not set';
-    final now = DateTime.now();
-    final local = dt.toLocal();
-
-    final today = DateTime(now.year, now.month, now.day);
-    final date = DateTime(local.year, local.month, local.day);
-    final diffDays = date.difference(today).inDays;
-
-    final timeStr = DateFormat('hh:mm a').format(local);
-    if (diffDays == 0) return 'Today • $timeStr';
-    if (diffDays == 1) return 'Tomorrow • $timeStr';
-    if (diffDays == -1) return 'Yesterday • $timeStr';
-
-    return DateFormat('MMM dd, yyyy • hh:mm a').format(local);
+    return DateFormat('MMM dd, yyyy • hh:mm a').format(dt);
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-
     if (_startDateTime == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Start date & time is required'), backgroundColor: Colors.red),
+        SnackBar(content: const Text('Start date & time is required'), backgroundColor: primaryRed),
       );
       return;
     }
 
     if (_endDateTime != null && _endDateTime!.isBefore(_startDateTime!)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('End time cannot be before start time'), backgroundColor: Colors.red),
+        SnackBar(content: const Text('End cannot be before start'), backgroundColor: primaryRed),
       );
       return;
     }
@@ -142,12 +184,24 @@ class _AddEventScreenState extends State<AddEventScreen> {
     setState(() => _isLoading = true);
 
     try {
+      String? uploadedImageUrl;
+
+      if (_selectedImage != null) {
+        uploadedImageUrl = await _uploadImage(_selectedImage!);
+        if (uploadedImageUrl == null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: const Text('Image upload failed — event saved without image'), backgroundColor: primaryRed),
+          );
+        }
+      }
+
       await FirebaseFirestore.instance.collection('events').add({
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
         'location': _locationController.text.trim(),
         'startDate': Timestamp.fromDate(_startDateTime!),
         'endDate': _endDateTime != null ? Timestamp.fromDate(_endDateTime!) : null,
+        'heroImageUrl': uploadedImageUrl,
         'createdAt': FieldValue.serverTimestamp(),
         'createdBy': FirebaseAuth.instance.currentUser?.uid,
         'createdByRole': _userRole,
@@ -162,7 +216,7 @@ class _AddEventScreenState extends State<AddEventScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error: $e'), backgroundColor: primaryRed),
         );
       }
     } finally {
@@ -173,51 +227,108 @@ class _AddEventScreenState extends State<AddEventScreen> {
   @override
   Widget build(BuildContext context) {
     if (_userRole == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(backgroundColor: backgroundCream, body: const Center(child: CircularProgressIndicator()));
     }
 
     if (!_isModeratorOrAdmin) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Add Event')),
-        body: const Center(
-          child: Text(
-            'Only Admin or Moderator can add events.',
-            style: TextStyle(fontSize: 18, color: Colors.grey),
-            textAlign: TextAlign.center,
+        backgroundColor: backgroundCream,
+        appBar: AppBar(
+          title: Text('Add Event', style: GoogleFonts.playfairDisplay(color: textDark)),
+          backgroundColor: backgroundCream,
+          foregroundColor: textDark,
+          elevation: 0,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Text(
+              'Only Administrators or Moderators can create new events.',
+              style: GoogleFonts.inter(fontSize: 18, color: textSecondary, height: 1.5),
+              textAlign: TextAlign.center,
+            ),
           ),
         ),
       );
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFE6D3AE),
+      backgroundColor: backgroundCream,
       appBar: AppBar(
-        title: const Text('Create New Event'),
-        backgroundColor: const Color(0xFFE64646),
+        title: Text(
+          'Create New Event',
+          style: GoogleFonts.playfairDisplay(fontSize: 26, color: Colors.white),
+        ),
+        backgroundColor: primaryRed,
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.fromLTRB(24, 32, 24, 40),
           child: Form(
             key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildTextField(_titleController, 'Event Title', 'Enter event title'),
+                Text(
+                  'Event Details',
+                  style: GoogleFonts.playfairDisplay(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                    color: textDark,
+                  ),
+                ),
+                const SizedBox(height: 28),
+
+                _buildTextField(_titleController, 'Event Title', 'What is this event called?'),
                 const SizedBox(height: 24),
-                _buildTextField(_descriptionController, 'Description', 'Describe the event', maxLines: 5),
+
+                _buildTextField(_descriptionController, 'Description', 'Tell people what to expect...', maxLines: 5),
                 const SizedBox(height: 24),
-                _buildTextField(_locationController, 'Location', 'Venue or online link'),
+
+                _buildTextField(_locationController, 'Location', 'Campus, online link, or venue'),
                 const SizedBox(height: 32),
 
-                _buildDateTimeTile('Start Date & Time', _startDateTime, true),
-                const Divider(height: 32),
-                _buildDateTimeTile('End Date & Time (optional)', _endDateTime, false),
+                Text(
+                  'Event Image (optional)',
+                  style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: textDark),
+                ),
+                const SizedBox(height: 12),
 
-                const SizedBox(height: 40),
+                GestureDetector(
+                  onTap: _pickImage,
+                  child: Container(
+                    height: 160,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: _selectedImage == null
+                        ? const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.add_photo_alternate_outlined, size: 48, color: Colors.grey),
+                              SizedBox(height: 12),
+                              Text('Tap to select image', style: TextStyle(color: Colors.grey)),
+                            ],
+                          )
+                        : ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: Image.file(_selectedImage!, fit: BoxFit.cover),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+
+                _buildDateTimeSelector('Start Date & Time', _startDateTime, true),
+                const Divider(height: 48, thickness: 1, color: Color.fromARGB(255, 238, 238, 238)),
+                _buildDateTimeSelector('End Date & Time (optional)', _endDateTime, false),
+
+                const SizedBox(height: 48),
 
                 SizedBox(
                   width: double.infinity,
@@ -225,17 +336,17 @@ class _AddEventScreenState extends State<AddEventScreen> {
                   child: ElevatedButton.icon(
                     onPressed: _isLoading ? null : _submit,
                     icon: _isLoading
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
+                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
                         : const Icon(Icons.event_available, size: 24),
                     label: Text(
                       _isLoading ? 'Creating...' : 'Create Event',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w600),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFE64646),
+                      backgroundColor: primaryRed,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      elevation: 2,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      elevation: 1,
                     ),
                   ),
                 ),
@@ -251,33 +362,64 @@ class _AddEventScreenState extends State<AddEventScreen> {
     return TextFormField(
       controller: controller,
       maxLines: maxLines,
+      style: GoogleFonts.inter(color: textDark),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
-        labelStyle: const TextStyle(color: Color(0xFFE64646)),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+        labelStyle: GoogleFonts.inter(color: primaryRed, fontWeight: FontWeight.w500),
+        hintStyle: GoogleFonts.inter(color: textSecondary.withOpacity(0.7)),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: Color(0xFFE64646), width: 2),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: primaryRed, width: 2),
         ),
         filled: true,
-        fillColor: Colors.white.withOpacity(0.9),
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       ),
-      validator: (value) => value?.trim().isEmpty ?? true ? 'This field is required' : null,
+      validator: (value) => value?.trim().isEmpty ?? true ? 'Required field' : null,
     );
   }
 
-  Widget _buildDateTimeTile(String label, DateTime? value, bool isStart) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(
-        _formatDateTime(value),
-        style: TextStyle(color: value == null ? Colors.grey[700] : Colors.black87),
-      ),
-      trailing: IconButton(
-        icon: const Icon(Icons.edit_calendar, color: Color(0xFFE64646)),
-        onPressed: () => _pickDateTime(isStart),
+  Widget _buildDateTimeSelector(String label, DateTime? value, bool isStart) {
+    return InkWell(
+      onTap: () => _pickDateTime(isStart),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: GoogleFonts.inter(fontSize: 14, color: textSecondary, fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _formatDateTime(value),
+                    style: GoogleFonts.inter(
+                      fontSize: 16,
+                      color: value == null ? textSecondary : textDark,
+                      fontWeight: value == null ? FontWeight.normal : FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.edit_calendar_outlined, color: primaryRed, size: 24),
+          ],
+        ),
       ),
     );
   }
