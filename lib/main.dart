@@ -10,6 +10,8 @@ import 'package:alumni/features/dashboard/presentation/screens/admin_dashboard_w
 import 'package:alumni/features/admin/presentation/screens/user_verification_moderation_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/event_planning_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/job_board_management_screen.dart';
+import 'package:alumni/features/admin/presentation/screens/chapter_management_screen.dart';
+import 'package:alumni/features/admin/presentation/screens/reunion_planning_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -45,6 +47,8 @@ class MyApp extends StatelessWidget {
         '/user_verification_moderation': (context) => const UserVerificationScreen(),
         '/event_planning': (context) => const EventPlanningScreen(),
         '/job_board_management': (context) => const JobBoardManagementScreen(),
+        '/chapter_management': (context) => const ChapterManagementScreen(),
+        '/reunions_events': (context) => const ReunionAndEventsScreen(),
       },
     );
   }

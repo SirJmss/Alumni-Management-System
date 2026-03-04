@@ -35,7 +35,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final auth = FirebaseAuth.instance;
       final firestore = FirebaseFirestore.instance;
 
-      // 1. Sign in
+      // Sign in
       final credential = await auth.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
@@ -44,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final user = credential.user;
       if (user == null) throw Exception("Login failed - no user returned");
 
-      // 2. Check status first (block pending users)
+      // Check user document
       final userDoc = await firestore.collection('users').doc(user.uid).get();
 
       if (!userDoc.exists) {
@@ -68,17 +68,16 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         }
-        setState(() => _isLoading = false);
         return;
       }
 
-      // 3. Update last login
+      // Update last login
       await firestore.collection('users').doc(user.uid).update({
         'lastLogin': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      // 4. Role-based navigation
+      // Role-based navigation
       final role = userData['role'] as String? ?? 'alumni';
 
       if (mounted) {
@@ -89,7 +88,6 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
 
-        // Redirect based on role and platform
         if (role == 'admin' && kIsWeb) {
           Navigator.pushReplacementNamed(context, '/admin');
         } else {
@@ -126,10 +124,10 @@ class _LoginScreenState extends State<LoginScreen> {
           SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
         );
       }
-    }
-
-    if (mounted) {
-      setState(() => _isLoading = false);
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -171,7 +169,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 const SizedBox(height: 80),
 
-                // Form container
+                // Form card
                 Container(
                   constraints: const BoxConstraints(maxWidth: 420),
                   padding: const EdgeInsets.fromLTRB(32, 40, 32, 48),
@@ -210,7 +208,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 40),
 
-                        // IDENTITY
+                        // Email
                         const Text(
                           'IDENTITY',
                           style: TextStyle(
@@ -225,6 +223,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           controller: _emailController,
                           keyboardType: TextInputType.emailAddress,
                           textInputAction: TextInputAction.next,
+                          onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
                           decoration: InputDecoration(
                             hintText: 'Email address',
                             hintStyle: TextStyle(color: Colors.grey.shade400),
@@ -251,10 +250,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 32),
 
-                        // SECURITY CODE + FORGOTTEN?
+                        // Password + Forgot link
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
                             const Text(
                               'SECURITY CODE',
@@ -287,6 +285,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           controller: _passwordController,
                           obscureText: _obscurePassword,
                           textInputAction: TextInputAction.done,
+                          onFieldSubmitted: (_) {
+                            if (!_isLoading) _login();
+                          },
                           decoration: InputDecoration(
                             hintText: '••••••••••',
                             hintStyle: TextStyle(
@@ -352,7 +353,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                         const SizedBox(height: 40),
 
-                        // Authenticate button
+                        // Login button
                         SizedBox(
                           width: double.infinity,
                           height: 56,
