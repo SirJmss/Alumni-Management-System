@@ -13,7 +13,7 @@ class JobBoardManagementScreen extends StatefulWidget {
 }
 
 class _JobBoardManagementScreenState extends State<JobBoardManagementScreen> {
-  String? selectedStatusFilter; // for optional filter: all, pending, approved, rejected
+  String? selectedStatusFilter;
 
   @override
   Widget build(BuildContext context) {
@@ -48,168 +48,180 @@ class _JobBoardManagementScreenState extends State<JobBoardManagementScreen> {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Job Postings',
-              style: GoogleFonts.cormorantGaramond(fontSize: 24, color: AppColors.darkText),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Review, approve, reject or manage alumni job listings',
-              style: GoogleFonts.inter(fontSize: 14, color: AppColors.mutedText),
-            ),
-            const SizedBox(height: 24),
+      body: RefreshIndicator(
+        onRefresh: () async => setState(() {}), // simple refresh trigger
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Job Postings',
+                style: GoogleFonts.cormorantGaramond(fontSize: 24, color: AppColors.darkText),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Review, approve, reject or manage alumni job listings',
+                style: GoogleFonts.inter(fontSize: 14, color: AppColors.mutedText),
+              ),
+              const SizedBox(height: 24),
 
-            Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: _buildJobQuery(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (snapshot.hasError) {
-                    return Center(
-                      child: Text(
-                        'Error loading jobs\n${snapshot.error}',
-                        style: const TextStyle(color: Colors.red, fontSize: 16),
-                        textAlign: TextAlign.center,
-                      ),
-                    );
-                  }
-
-                  final jobs = snapshot.data?.docs ?? [];
-
-                  if (jobs.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.work_off, size: 64, color: Colors.grey),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No job postings yet',
-                            style: GoogleFonts.inter(fontSize: 18, color: Colors.grey[700]),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Alumni can post jobs from their profile or mobile app',
-                            style: GoogleFonts.inter(fontSize: 14, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  return ListView.builder(
-                    itemCount: jobs.length,
-                    itemBuilder: (context, index) {
-                      final doc = jobs[index];
-                      final data = doc.data() as Map<String, dynamic>;
-
-                      final postedAt = (data['postedAt'] as Timestamp?)?.toDate();
-                      final status = data['status'] as String? ?? 'pending';
-
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        elevation: 1,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          leading: CircleAvatar(
-                            radius: 28,
-                            backgroundColor: _getStatusColor(status).withOpacity(0.15),
-                            child: Icon(Icons.work, color: _getStatusColor(status)),
-                          ),
-                          title: Text(
-                            data['title'] ?? 'No title',
-                            style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                data['company'] ?? 'Unknown company',
-                                style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w500),
-                              ),
-                              const SizedBox(height: 4),
-                              if (postedAt != null)
-                                Text(
-                                  'Posted ${DateFormat('MMM dd, yyyy').format(postedAt)}',
-                                  style: GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText),
-                                ),
-                              const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                    decoration: BoxDecoration(
-                                      color: _getStatusColor(status).withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      status.toUpperCase(),
-                                      style: GoogleFonts.inter(
-                                        fontSize: 11,
-                                        color: _getStatusColor(status),
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    data['location'] ?? 'Remote / Not specified',
-                                    style: GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (status == 'pending') ...[
-                                IconButton(
-                                  icon: const Icon(Icons.check_circle_outline, color: Colors.green, size: 22),
-                                  tooltip: 'Approve',
-                                  onPressed: () => _updateJobStatus(doc.id, 'approved'),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.cancel_outlined, color: Colors.redAccent, size: 22),
-                                  tooltip: 'Reject',
-                                  onPressed: () => _updateJobStatus(doc.id, 'rejected'),
-                                ),
-                              ],
-                              IconButton(
-                                icon: const Icon(Icons.edit_outlined, size: 22),
-                                tooltip: 'Edit',
-                                onPressed: () => _showEditJobDialog(doc.id, data),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline, size: 22, color: Colors.redAccent),
-                                tooltip: 'Delete',
-                                onPressed: () => _confirmDeleteJob(doc.id, data['title'] ?? 'this job'),
-                              ),
-                            ],
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: _buildJobQuery(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(32),
+                          child: Text(
+                            'Error loading jobs:\n${snapshot.error}',
+                            style: const TextStyle(color: Colors.red, fontSize: 16),
+                            textAlign: TextAlign.center,
                           ),
                         ),
                       );
-                    },
-                  );
-                },
+                    }
+
+                    final jobs = snapshot.data?.docs ?? [];
+
+                    if (jobs.isEmpty) {
+                      return Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.work_off_rounded, size: 64, color: Colors.grey),
+                            const SizedBox(height: 16),
+                            Text(
+                              'No job postings found',
+                              style: GoogleFonts.inter(fontSize: 18, color: Colors.grey[700]),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              selectedStatusFilter != null
+                                  ? 'No jobs with status: $selectedStatusFilter'
+                                  : 'Alumni can post jobs from their profile or mobile app',
+                              style: GoogleFonts.inter(fontSize: 14, color: Colors.grey),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      itemCount: jobs.length,
+                      itemBuilder: (context, index) {
+                        final doc = jobs[index];
+                        final data = doc.data() as Map<String, dynamic>;
+
+                        final postedAt = (data['postedAt'] as Timestamp?)?.toDate() ??
+                            (data['postedat'] as Timestamp?)?.toDate(); // handle your lowercase field
+                        final status = (data['status'] as String?)?.toLowerCase() ?? 'pending';
+
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          elevation: 1,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            leading: CircleAvatar(
+                              radius: 28,
+                              backgroundColor: _getStatusColor(status).withOpacity(0.15),
+                              child: Icon(Icons.work, color: _getStatusColor(status)),
+                            ),
+                            title: Text(
+                              data['title']?.toString() ?? 'No title',
+                              style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16),
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  data['company']?.toString() ?? 'Unknown company',
+                                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w500),
+                                ),
+                                const SizedBox(height: 4),
+                                if (postedAt != null)
+                                  Text(
+                                    'Posted ${DateFormat('MMM dd, yyyy • h:mm a').format(postedAt)}',
+                                    style: GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText),
+                                  ),
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                      decoration: BoxDecoration(
+                                        color: _getStatusColor(status).withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        status.toUpperCase(),
+                                        style: GoogleFonts.inter(
+                                          fontSize: 11,
+                                          color: _getStatusColor(status),
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      data['location']?.toString() ?? data['locatoun']?.toString() ?? 'Not specified',
+                                      style: GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (status == 'pending') ...[
+                                  IconButton(
+                                    icon: const Icon(Icons.check_circle_outline, color: Colors.green, size: 22),
+                                    tooltip: 'Approve',
+                                    onPressed: () => _updateJobStatus(doc.id, 'approved'),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.cancel_outlined, color: Colors.redAccent, size: 22),
+                                    tooltip: 'Reject',
+                                    onPressed: () => _updateJobStatus(doc.id, 'rejected'),
+                                  ),
+                                ],
+                                IconButton(
+                                  icon: const Icon(Icons.edit_outlined, size: 22),
+                                  tooltip: 'Edit',
+                                  onPressed: () => _showEditJobDialog(doc.id, data),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, size: 22, color: Colors.redAccent),
+                                  tooltip: 'Delete',
+                                  onPressed: () => _confirmDeleteJob(doc.id, data['title']?.toString() ?? 'this job'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
   Stream<QuerySnapshot> _buildJobQuery() {
-    Query query = FirebaseFirestore.instance.collection('job_postings').orderBy('postedAt', descending: true);
+    Query query = FirebaseFirestore.instance
+        .collection('job_posting')  // ← corrected to match your actual collection name
+        .orderBy('postedAt', descending: true);
 
     if (selectedStatusFilter != null) {
       query = query.where('status', isEqualTo: selectedStatusFilter);
@@ -219,7 +231,7 @@ class _JobBoardManagementScreenState extends State<JobBoardManagementScreen> {
   }
 
   Color _getStatusColor(String status) {
-    switch (status) {
+    switch (status.toLowerCase()) {
       case 'approved':
         return Colors.green;
       case 'rejected':
@@ -233,11 +245,13 @@ class _JobBoardManagementScreenState extends State<JobBoardManagementScreen> {
 
   Future<void> _updateJobStatus(String jobId, String newStatus) async {
     try {
-      await FirebaseFirestore.instance.collection('job_postings').doc(jobId).update({
+      await FirebaseFirestore.instance.collection('job_posting').doc(jobId).update({
         'status': newStatus,
         'updatedAt': FieldValue.serverTimestamp(),
-        if (newStatus == 'approved') 'approvedBy': FirebaseAuth.instance.currentUser?.uid,
-        if (newStatus == 'approved') 'approvedAt': FieldValue.serverTimestamp(),
+        if (newStatus == 'approved') ...{
+          'approvedBy': FirebaseAuth.instance.currentUser?.uid,
+          'approvedAt': FieldValue.serverTimestamp(),
+        },
       });
 
       if (mounted) {
@@ -258,11 +272,11 @@ class _JobBoardManagementScreenState extends State<JobBoardManagementScreen> {
   }
 
   void _showEditJobDialog(String jobId, Map<String, dynamic> initialData) {
-    final titleCtrl = TextEditingController(text: initialData['title'] ?? '');
-    final companyCtrl = TextEditingController(text: initialData['company'] ?? '');
-    final locationCtrl = TextEditingController(text: initialData['location'] ?? '');
-    final descCtrl = TextEditingController(text: initialData['description'] ?? '');
-    final salaryCtrl = TextEditingController(text: initialData['salaryRange'] ?? '');
+    final titleCtrl = TextEditingController(text: initialData['title']?.toString() ?? '');
+    final companyCtrl = TextEditingController(text: initialData['company']?.toString() ?? '');
+    final locationCtrl = TextEditingController(text: initialData['location']?.toString() ?? initialData['locatoun']?.toString() ?? '');
+    final descCtrl = TextEditingController(text: initialData['description']?.toString() ?? '');
+    final salaryCtrl = TextEditingController(text: initialData['salaryRange']?.toString() ?? '');
 
     showDialog(
       context: context,
@@ -300,10 +314,10 @@ class _JobBoardManagementScreenState extends State<JobBoardManagementScreen> {
               }
 
               try {
-                await FirebaseFirestore.instance.collection('job_postings').doc(jobId).update({
+                await FirebaseFirestore.instance.collection('job_posting').doc(jobId).update({
                   'title': titleCtrl.text.trim(),
                   'company': companyCtrl.text.trim(),
-                  'location': locationCtrl.text.trim(),
+                  'location': locationCtrl.text.trim().isNotEmpty ? locationCtrl.text.trim() : null,
                   'description': descCtrl.text.trim(),
                   'salaryRange': salaryCtrl.text.trim().isNotEmpty ? salaryCtrl.text.trim() : null,
                   'updatedAt': FieldValue.serverTimestamp(),
@@ -344,7 +358,7 @@ class _JobBoardManagementScreenState extends State<JobBoardManagementScreen> {
 
     if (confirm == true) {
       try {
-        await FirebaseFirestore.instance.collection('job_postings').doc(jobId).delete();
+        await FirebaseFirestore.instance.collection('job_posting').doc(jobId).delete();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Job deleted'), backgroundColor: Colors.green),

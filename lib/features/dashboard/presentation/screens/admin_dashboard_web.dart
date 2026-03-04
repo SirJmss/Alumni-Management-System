@@ -436,7 +436,7 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
       return ElevatedButton(
         onPressed: () {},
         style: style.copyWith(
-            shape: const MaterialStatePropertyAll(RoundedRectangleBorder())),
+            shape: const WidgetStatePropertyAll(RoundedRectangleBorder())),
         child: Text(
           text,
           style: GoogleFonts.inter(
@@ -451,7 +451,7 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
       return OutlinedButton(
         onPressed: () {},
         style: style.copyWith(
-            shape: const MaterialStatePropertyAll(RoundedRectangleBorder())),
+            shape: const WidgetStatePropertyAll(RoundedRectangleBorder())),
         child: Text(
           text,
           style: GoogleFonts.inter(

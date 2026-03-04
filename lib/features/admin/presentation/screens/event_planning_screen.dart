@@ -332,7 +332,7 @@ class _EventPlanningScreenState extends State<EventPlanningScreen> {
 
                 // Status dropdown
                 DropdownButtonFormField<String>(
-                  value: status,
+                  initialValue: status,
                   decoration: const InputDecoration(labelText: 'Status'),
                   items: const [
                     DropdownMenuItem(value: 'draft', child: Text('Draft')),
@@ -367,7 +367,7 @@ class _EventPlanningScreenState extends State<EventPlanningScreen> {
                 'title': titleCtrl.text.trim(),
                 'description': descCtrl.text.trim(),
                 'location': locationCtrl.text.trim(),
-                'capacity': int.tryParse(capacityCtrl.text.trim()) ?? null,
+                'capacity': int.tryParse(capacityCtrl.text.trim()),
                 'startDate': Timestamp.fromDate(startDate!),
                 if (endDate != null) 'endDate': Timestamp.fromDate(endDate!),
                 'status': status,

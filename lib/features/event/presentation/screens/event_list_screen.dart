@@ -308,7 +308,7 @@ class _EventListScreenState extends State<EventListScreen> {
                                             final count = snapshot.data?.docs.length ?? 0;
                                             return Row(
                                               children: [
-                                                Icon(Icons.chat_bubble_outline, color: Colors.black87, size: 26),
+                                                const Icon(Icons.chat_bubble_outline, color: Colors.black87, size: 26),
                                                 const SizedBox(width: 4),
                                                 Text('$count', style: const TextStyle(color: Colors.black87, fontSize: 14)),
                                               ],
@@ -317,13 +317,13 @@ class _EventListScreenState extends State<EventListScreen> {
                                         ),
                                       ),
 
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 12),
                                         child: Icon(Icons.send_outlined, color: Colors.black87, size: 26),
                                       ),
                                     ],
                                   ),
-                                  Icon(Icons.bookmark_border, color: Colors.black87, size: 28),
+                                  const Icon(Icons.bookmark_border, color: Colors.black87, size: 28),
                                 ],
                               ),
 

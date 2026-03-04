@@ -179,7 +179,7 @@ class _ElegantCard extends StatelessWidget {
                     children: [
                       Text(
                         item['title']!,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 18.5,
                           fontWeight: FontWeight.w600,

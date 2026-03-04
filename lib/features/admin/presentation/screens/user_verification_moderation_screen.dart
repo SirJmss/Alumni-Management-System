@@ -333,10 +333,10 @@ class _UserVerificationScreenState extends State<UserVerificationScreen> {
                             Expanded(
                               child: TextField(
                                 controller: searchController,
-                                decoration: InputDecoration(
+                                decoration: const InputDecoration(
                                   labelText: 'Search by name or email',
-                                  border: const OutlineInputBorder(),
-                                  prefixIcon: const Icon(Icons.search),
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.search),
                                   filled: true,
                                   fillColor: AppColors.cardWhite,
                                 ),
