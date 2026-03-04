@@ -314,7 +314,7 @@ class _CareerMilestonesScreenState extends State<CareerMilestonesScreen> {
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
-                    value: selectedType,
+                    initialValue: selectedType,
                     decoration: const InputDecoration(labelText: 'Milestone Type'),
                     items: const [
                       DropdownMenuItem(value: 'promotion', child: Text('Promotion')),

@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-
 import 'package:alumni/core/constants/app_colors.dart';
 
 class UserVerificationScreen extends StatefulWidget {
@@ -14,35 +13,24 @@ class UserVerificationScreen extends StatefulWidget {
 }
 
 class _UserVerificationScreenState extends State<UserVerificationScreen> {
-  List<Map<String, dynamic>> allUsers = [];
-  List<Map<String, dynamic>> filteredUsers = [];
-  int pendingCount = 0;
+  bool isVerificationTab = true; // true = User Verification, false = Reports & Moderation
+
+  List<Map<String, dynamic>> pendingVerifications = [];
+  List<Map<String, dynamic>> moderationReports = [];
 
   bool isLoading = true;
-  bool isActionInProgress = false;
   String? errorMessage;
 
-  String statusFilter = 'all';
-  String searchQuery = '';
-
-  final TextEditingController searchController = TextEditingController();
+  int pendingCount = 0;
+  int avgApprovalHours = 14;
 
   @override
   void initState() {
     super.initState();
-    _loadUsers();
-    searchController.addListener(_applyFilters);
+    _loadData();
   }
 
-  @override
-  void dispose() {
-    searchController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadUsers() async {
-    if (!mounted) return;
-
+  Future<void> _loadData() async {
     setState(() {
       isLoading = true;
       errorMessage = null;
@@ -51,566 +39,816 @@ class _UserVerificationScreenState extends State<UserVerificationScreen> {
     try {
       final firestore = FirebaseFirestore.instance;
 
-      final querySnap = await firestore
+      final pendingSnap = await firestore
           .collection('users')
+          .where('status', isEqualTo: 'pending')
           .orderBy('createdAt', descending: true)
+          .limit(20)
           .get();
 
-      final users = querySnap.docs.map((doc) {
+      final pending = pendingSnap.docs.map((doc) {
         final data = doc.data();
-        return <String, dynamic>{
+        final name = (data['name'] ?? data['fullName'] ?? 'Unknown').trim();
+        return {
           'id': doc.id,
-          'name': (data['name'] as String? ?? data['fullName'] as String? ?? 'Unknown').trim(),
-          'email': (data['email'] as String? ?? '—').trim(),
-          'degree': (data['degree'] as String? ?? '').trim(),
-          'batchYear': (data['batchYear'] as String? ?? data['batch'] as String? ?? '').trim(),
-          'status': (data['status'] as String? ?? 'unknown').toLowerCase(),
-          'submitted': _formatTimestamp(data['createdAt'] as Timestamp?),
-          'profilePhotoUrl': data['profilePhotoUrl'] as String?,
-          'idPhotoFrontUrl': data['idPhotoFrontUrl'] as String?,
-          'idPhotoBackUrl': data['idPhotoBackUrl'] as String?,
+          'name': name,
+          'degree': data['degree'] ?? '',
+          'batchYear': data['batchYear'] ?? data['batch'] ?? '',
+          'submittedVia': data['verificationMethod'] ?? 'Unknown',
+          'reqId': 'REQ-${doc.id.substring(0, 6).toUpperCase()}',
+          'timeAgo': _timeAgo((data['createdAt'] as Timestamp?)?.toDate()),
+          'profilePhoto': data['profilePhotoUrl'],
+          'idFront': data['idPhotoFrontUrl'],
+          'idBack': data['idPhotoBackUrl'],
         };
       }).toList();
 
-      if (!mounted) return;
+      final reportsSnap = await firestore
+          .collection('reports')
+          .where('status', isEqualTo: 'pending')
+          .orderBy('reportedAt', descending: true)
+          .limit(15)
+          .get();
 
-      setState(() {
-        allUsers = users;
-        pendingCount = users.where((u) => u['status'] == 'pending').length;
-        _applyFilters();
-        isLoading = false;
-      });
-    } catch (e, stack) {
-      debugPrint('Failed to load users: $e\n$stack');
+      final reports = reportsSnap.docs.map((doc) {
+        final data = doc.data();
+        final type = data['type'] ?? 'Unknown';
+        final priority = data['priority'] ?? 'Medium';
+        final color = priority == 'High' ? Colors.red : Colors.orange;
+        return {
+          'id': doc.id,
+          'type': type,
+          'priority': priority,
+          'reportedBy': data['reportedByName'] ?? 'System',
+          'timeAgo': _timeAgo((data['reportedAt'] as Timestamp?)?.toDate()),
+          'snippet': (data['content'] ?? '').toString().substring(0, 140) + ((data['content']?.toString().length ?? 0) > 140 ? '...' : ''),
+          'offender': data['offenderName'] ?? 'Unknown',
+          'severityColor': color,
+        };
+      }).toList();
+
+      final statsSnap = await firestore.collection('stats').doc('verification').get();
+      final stats = statsSnap.data() ?? {};
+
       if (mounted) {
         setState(() {
-          errorMessage = 'Unable to load users.\nPlease try again.';
+          pendingVerifications = pending;
+          moderationReports = reports;
+          pendingCount = pending.length;
+          avgApprovalHours = stats['avgApprovalHours']?.toInt() ?? 14;
+          isLoading = false;
+        });
+      }
+    } catch (e, stack) {
+      debugPrint('Dashboard load error: $e\n$stack');
+      if (mounted) {
+        setState(() {
+          errorMessage = 'Failed to load data.\n$e';
           isLoading = false;
         });
       }
     }
   }
 
-  void _applyFilters() {
-    var temp = List<Map<String, dynamic>>.from(allUsers);
-
-    if (statusFilter != 'all') {
-      temp = temp.where((u) => u['status'] == statusFilter).toList();
-    }
-
-    final q = searchQuery.trim().toLowerCase();
-    if (q.isNotEmpty) {
-      temp = temp.where((u) {
-        final name = (u['name'] as String?)?.toLowerCase() ?? '';
-        final email = (u['email'] as String?)?.toLowerCase() ?? '';
-        return name.contains(q) || email.contains(q);
-      }).toList();
-    }
-
-    if (mounted) {
-      setState(() => filteredUsers = temp);
-    }
+  String _timeAgo(DateTime? date) {
+    if (date == null) return 'N/A';
+    final diff = DateTime.now().difference(date);
+    if (diff.inDays > 0) return '${diff.inDays}d ago';
+    if (diff.inHours > 0) return '${diff.inHours}h ago';
+    if (diff.inMinutes > 0) return '${diff.inMinutes}m ago';
+    return 'just now';
   }
 
-  String _formatTimestamp(Timestamp? ts) {
-    if (ts == null) return 'N/A';
-    final date = ts.toDate();
-    final now = DateTime.now();
-    if (date.isAfter(now.subtract(const Duration(days: 2)))) {
-      return DateFormat('h:mm a').format(date);
-    }
-    if (date.year == now.year) {
-      return DateFormat('MMM d • h:mm a').format(date);
-    }
-    return DateFormat('MMM d, yyyy • h:mm a').format(date);
+  Future<void> _approveUser(String userId) async {
+    await FirebaseFirestore.instance.collection('users').doc(userId).update({
+      'status': 'verified',
+      'verifiedAt': FieldValue.serverTimestamp(),
+      'verifiedBy': FirebaseAuth.instance.currentUser?.uid,
+    });
+    await _loadData();
   }
 
-  Future<void> _performAction(
-    Future<void> Function() action, {
-    required String successMessage,
-    required String errorPrefix,
-    required Color successColor,
-  }) async {
-    if (isActionInProgress || !mounted) return;
-    setState(() => isActionInProgress = true);
-
-    try {
-      await action();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(successMessage),
-            backgroundColor: successColor,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-        await _loadUsers();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$errorPrefix: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => isActionInProgress = false);
-    }
-  }
-
-  Future<void> _verifyUser(String uid) => _performAction(
-        () => FirebaseFirestore.instance.collection('users').doc(uid).update({
-          'status': 'verified',
-          'verifiedAt': FieldValue.serverTimestamp(),
-          'verifiedBy': FirebaseAuth.instance.currentUser?.uid,
-          'updatedAt': FieldValue.serverTimestamp(),
-        }),
-        successMessage: 'User verified successfully',
-        errorPrefix: 'Verification failed',
-        successColor: AppColors.success,
-      );
-
-  Future<void> _denyOrBanUser(String uid, String currentStatus) async {
-    final reasonCtrl = TextEditingController();
-
-    final title = currentStatus == 'pending' ? 'Deny Verification' : 'Ban User';
-
-    final confirmed = await showDialog<bool?>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Provide a reason (optional but recommended):'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: reasonCtrl,
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. Invalid documents, policy violation...',
-                hintStyle: GoogleFonts.inter(color: AppColors.mutedText),
-              ),
-              maxLines: 3,
-              style: GoogleFonts.inter(),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: GoogleFonts.inter(color: AppColors.mutedText)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('Confirm', style: GoogleFonts.inter(color: AppColors.brandRed, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    await _performAction(
-      () => FirebaseFirestore.instance.collection('users').doc(uid).update({
-        'status': 'denied',
-        'deniedReason': reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : null,
-        'deniedAt': FieldValue.serverTimestamp(),
-        'deniedBy': FirebaseAuth.instance.currentUser?.uid,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }),
-      successMessage: 'User denied/banned successfully',
-      errorPrefix: 'Action failed',
-      successColor: AppColors.warning,
-    );
-  }
-
-  Future<void> _reinstateUser(String uid) => _performAction(
-        () => FirebaseFirestore.instance.collection('users').doc(uid).update({
-          'status': 'verified',
-          'reinstatedAt': FieldValue.serverTimestamp(),
-          'reinstatedBy': FirebaseAuth.instance.currentUser?.uid,
-          'updatedAt': FieldValue.serverTimestamp(),
-          'deniedReason': FieldValue.delete(),
-        }),
-        successMessage: 'User reinstated successfully',
-        errorPrefix: 'Reinstate failed',
-        successColor: AppColors.success,
-      );
-
-  Future<void> _deleteUser(String uid) async {
-    final confirmed = await showDialog<bool?>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete User'),
-        content: const Text('Are you sure you want to delete this user? This action cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: GoogleFonts.inter(color: AppColors.mutedText)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('Delete', style: GoogleFonts.inter(color: AppColors.error, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    await _performAction(
-      () => FirebaseFirestore.instance.collection('users').doc(uid).delete(),
-      successMessage: 'User deleted successfully',
-      errorPrefix: 'Delete failed',
-      successColor: AppColors.error,
-    );
+  Future<void> _rejectUser(String userId) async {
+    await FirebaseFirestore.instance.collection('users').doc(userId).update({
+      'status': 'rejected',
+      'rejectedAt': FieldValue.serverTimestamp(),
+      'rejectedBy': FirebaseAuth.instance.currentUser?.uid,
+    });
+    await _loadData();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.softWhite,
-      appBar: AppBar(
-        backgroundColor: AppColors.cardWhite,
-        elevation: 0,
-        title: Text(
-          'User Verification & Moderation',
-          style: GoogleFonts.cormorantGaramond(
-            fontSize: 32,
-            fontWeight: FontWeight.w300,
-            color: AppColors.darkText,
-          ),
-        ),
-        actions: [
-          if (isActionInProgress)
-            const Padding(
-              padding: EdgeInsets.only(right: 24),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.brandRed),
-              ),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.refresh_rounded, color: AppColors.brandRed),
-              onPressed: isLoading ? null : _loadUsers,
-              tooltip: 'Refresh',
+      body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Sidebar ────────────────────────────────────────────────────────────────
+          Container(
+            width: 300,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(right: BorderSide(color: AppColors.borderSubtle, width: 0.5)),
             ),
-          const SizedBox(width: 16),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: isLoading || isActionInProgress ? () async {} : _loadUsers,
-        color: AppColors.brandRed,
-        child: isLoading
-            ? const Center(child: CircularProgressIndicator(color: AppColors.brandRed))
-            : errorMessage != null
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 60),
-                      child: SelectableText(
-                        errorMessage!,
-                        style: GoogleFonts.inter(
-                          color: AppColors.error,
-                          fontSize: 16,
-                          height: 1.5,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  )
-                : Column(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(64, 24, 64, 16),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: searchController,
-                                decoration: const InputDecoration(
-                                  labelText: 'Search by name or email',
-                                  border: OutlineInputBorder(),
-                                  prefixIcon: Icon(Icons.search),
-                                  filled: true,
-                                  fillColor: AppColors.cardWhite,
-                                ),
-                                onChanged: (value) {
-                                  searchQuery = value;
-                                  _applyFilters();
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 24),
-                            DropdownButton<String>(
-                              value: statusFilter,
-                              items: const [
-                                DropdownMenuItem(value: 'all', child: Text('All')),
-                                DropdownMenuItem(value: 'pending', child: Text('Pending')),
-                                DropdownMenuItem(value: 'verified', child: Text('Verified')),
-                                DropdownMenuItem(value: 'denied', child: Text('Denied')),
-                              ],
-                              onChanged: (value) {
-                                if (value != null) {
-                                  setState(() {
-                                    statusFilter = value;
-                                    _applyFilters();
-                                  });
-                                }
-                              },
-                            ),
-                          ],
+                      Text(
+                        'ALUMNI',
+                        style: GoogleFonts.cormorantGaramond(
+                          fontSize: 22,
+                          letterSpacing: 6,
+                          color: AppColors.brandRed,
+                          fontWeight: FontWeight.w300,
                         ),
                       ),
-                      Expanded(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.fromLTRB(64, 0, 64, 120),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'User Management',
-                                style: GoogleFonts.cormorantGaramond(
-                                  fontSize: 48,
-                                  fontStyle: FontStyle.italic,
-                                  fontWeight: FontWeight.w300,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Pending verifications: $pendingCount',
-                                style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  letterSpacing: 0.8,
-                                  color: AppColors.mutedText,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 48),
-
-                              if (filteredUsers.isEmpty)
-                                Center(
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 120),
-                                    child: Text(
-                                      'No users match the current filters.',
-                                      style: GoogleFonts.inter(
-                                        color: AppColors.mutedText,
-                                        fontSize: 17,
-                                      ),
-                                    ),
-                                  ),
-                                )
-                              else
-                                Container(
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: AppColors.borderSubtle),
-                                  ),
-                                  child: DataTable(
-                                    headingRowColor: WidgetStateProperty.all(AppColors.softWhite),
-                                    dataRowMinHeight: 72,
-                                    dataRowMaxHeight: 96,
-                                    columnSpacing: 24,
-                                    columns: const [
-                                      DataColumn(label: _HeaderLabel('ALUMNUS')),
-                                      DataColumn(label: _HeaderLabel('EMAIL')),
-                                      DataColumn(label: _HeaderLabel('BATCH / DEGREE')),
-                                      DataColumn(label: _HeaderLabel('STATUS')),
-                                      DataColumn(label: _HeaderLabel('SUBMITTED')),
-                                      DataColumn(label: _HeaderLabel('IMAGES')),
-                                      DataColumn(label: _HeaderLabel('ACTIONS')),
-                                    ],
-                                    rows: filteredUsers.map(_buildRow).toList(),
-                                  ),
-                                ),
-
-                              const SizedBox(height: 120),
-                            ],
-                          ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'ARCHIVE PORTAL',
+                        style: GoogleFonts.inter(
+                          fontSize: 9,
+                          letterSpacing: 2,
+                          color: AppColors.mutedText,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ],
                   ),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildSidebarSection('NETWORK', [
+                          _SidebarItem(label: 'Overview', route: '/overview'),
+                          _SidebarItem(label: 'Chapter Management', route: '/chapter_management'),
+                        ]),
+                        const SizedBox(height: 32),
+                        _buildSidebarSection('ENGAGEMENT', [
+                          _SidebarItem(label: 'Reunions & Events', route: '/reunions_events'),
+                          _SidebarItem(label: 'Career Milestones', route: '/career_milestones'),
+                        ]),
+                        const SizedBox(height: 32),
+                        _buildSidebarSection('ADMIN FEATURES', [
+                          _SidebarItem(label: 'User Verification & Moderation', isActive: true, route: '/user_verification_moderation'),
+                          _SidebarItem(label: 'Event Planning', route: '/event_planning'),
+                          _SidebarItem(label: 'Job Board Management', route: '/job_board_management'),
+                          _SidebarItem(label: 'Growth Metrics', route: '/growth_metrics'),
+                          _SidebarItem(label: 'Announcement Management', route: '/announcement_management'),
+                        ]),
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(32),
+                  decoration: BoxDecoration(
+                    border: Border(top: BorderSide(color: AppColors.borderSubtle.withOpacity(0.3))),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 16,
+                            backgroundColor: AppColors.brandRed,
+                            child: Text('A', style: GoogleFonts.cormorantGaramond(color: Colors.white, fontSize: 14)),
+                          ),
+                          const SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Registrar Admin', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold)),
+                              Text('NETWORK OVERSEER', style: GoogleFonts.inter(fontSize: 9, color: AppColors.mutedText)),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      TextButton(
+                        onPressed: () async {
+                          await FirebaseAuth.instance.signOut();
+                          if (mounted) Navigator.pushReplacementNamed(context, '/');
+                        },
+                        child: Text(
+                          'DISCONNECT',
+                          style: GoogleFonts.inter(fontSize: 10, letterSpacing: 2, color: AppColors.mutedText, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Main content ────────────────────────────────────────────────────────────
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header row ───────────────────────────────────────────────────────
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Trust & Safety Dashboard',
+                            style: GoogleFonts.cormorantGaramond(
+                              fontSize: 40,
+                              fontWeight: FontWeight.w400,
+                              color: AppColors.darkText,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Verify identities and moderate community interactions.',
+                            style: GoogleFonts.inter(
+                              fontSize: 16,
+                              color: AppColors.mutedText,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          GestureDetector(
+                            onTap: () => setState(() => isVerificationTab = true),
+                            child: _TabButton(label: 'User Verification', active: isVerificationTab),
+                          ),
+                          const SizedBox(width: 16),
+                          GestureDetector(
+                            onTap: () => setState(() => isVerificationTab = false),
+                            child: _TabButton(label: 'Reports & Moderation', active: !isVerificationTab),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 48),
+
+                  // Tab content ────────────────────────────────────────────────────────
+                  if (isVerificationTab)
+                    _buildVerificationTab()
+                  else
+                    _buildModerationTab(),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  DataRow _buildRow(Map<String, dynamic> user) {
-    final degree = user['degree'] as String? ?? '';
-    final batchYear = user['batchYear'] as String? ?? '';
-    final degreeBatch = (degree.isNotEmpty && batchYear.isNotEmpty)
-        ? '$degree • $batchYear'
-        : (degree.isNotEmpty ? degree : (batchYear.isNotEmpty ? batchYear : '—'));
-
-    final status = (user['status'] as String?)?.toLowerCase() ?? 'unknown';
-
-    return DataRow(
-      cells: [
-        DataCell(
-          Text(
-            user['name'] as String? ?? 'Unknown',
-            style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w600),
-          ),
-        ),
-        DataCell(
-          Text(
-            user['email'] as String? ?? '—',
-            style: GoogleFonts.inter(fontSize: 12.5, color: AppColors.mutedText),
-          ),
-        ),
-        DataCell(
-          Text(
-            degreeBatch,
-            style: GoogleFonts.inter(fontSize: 12.5),
-          ),
-        ),
-        DataCell(_buildStatusChip(status)),
-        DataCell(
-          Text(
-            user['submitted'] as String? ?? 'N/A',
-            style: GoogleFonts.inter(fontSize: 11.5, color: AppColors.mutedText),
-          ),
-        ),
-        DataCell(
-          TextButton(
-            onPressed: () => _showImages(user),
-            child: Text(
-              'View',
-              style: GoogleFonts.inter(color: AppColors.brandRed, fontWeight: FontWeight.w600),
+  Widget _buildVerificationTab() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Left column ── Verification Health + Critical Alerts
+            Expanded(
+              flex: 2,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _Card(
+                    title: 'VERIFICATION HEALTH',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _StatRow(label: 'Avg. Approval Time', value: '$avgApprovalHours h'),
+                        const SizedBox(height: 24),
+                        _StatRow(
+                          label: 'Pending Requests',
+                          value: pendingCount.toString(),
+                          progress: pendingCount / 200.clamp(0.0, 1.0),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  _Card(
+                    title: 'CRITICAL ALERTS',
+                    accentColor: Colors.red,
+                    child: Column(
+                      children: [
+                        _AlertItem(
+                          icon: Icons.warning_amber_rounded,
+                          title: 'Spam Attack Detected',
+                          subtitle: '12 new accounts flagged from same IP range.',
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ),
-        DataCell(
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (status == 'pending') ...[
-                _ActionButton('Verify', Icons.check_circle_outline, AppColors.success, () => _verifyUser(user['id'] as String)),
-                _ActionButton('Deny', Icons.block, AppColors.warning, () => _denyOrBanUser(user['id'] as String, status)),
-              ] else if (status == 'verified') ...[
-                _ActionButton('Edit', Icons.edit, AppColors.info, () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Edit feature coming soon')),
-                  );
-                }),
-                _ActionButton('Ban', Icons.block, AppColors.warning, () => _denyOrBanUser(user['id'] as String, status)),
-              ] else if (status == 'denied') ...[
-                _ActionButton('Reinstate', Icons.restore, AppColors.success, () => _reinstateUser(user['id'] as String)),
-              ],
-              _ActionButton('Delete', Icons.delete_outline, AppColors.error, () => _deleteUser(user['id'] as String)),
-            ],
-          ),
+            const SizedBox(width: 32),
+
+            // Right column ── Identity Verification Queue
+            Expanded(
+              flex: 5,
+              child: _Card(
+                title: 'Identity Verification Queue',
+                search: true,
+                child: isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : pendingVerifications.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 100),
+                              child: Text(
+                                'No pending verification requests',
+                                style: GoogleFonts.inter(fontSize: 17, color: AppColors.mutedText),
+                              ),
+                            ),
+                          )
+                        : Column(
+                            children: pendingVerifications.map((user) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 20),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 26,
+                                      backgroundColor: AppColors.brandRed.withOpacity(0.1),
+                                      child: Text(
+                                        (user['name'] as String)[0],
+                                        style: GoogleFonts.inter(color: AppColors.brandRed, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 16),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            user['name'] as String,
+                                            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '${user['degree']} • Class of ${user['batchYear']}',
+                                            style: GoogleFonts.inter(fontSize: 13, color: AppColors.mutedText),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Via ${user['submittedVia']} • ${user['reqId']} • ${user['timeAgo']}',
+                                            style: GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Row(
+                                      children: [
+                                        _ActionChip(
+                                          label: 'View Docs',
+                                          icon: Icons.description_outlined,
+                                          color: AppColors.brandRed,
+                                          onTap: () => _showUserDocs(user),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        _ActionChip(
+                                          label: 'Approve',
+                                          icon: Icons.check_circle_outline,
+                                          color: Colors.green,
+                                          onTap: () => _approveUser(user['id'] as String),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        _ActionChip(
+                                          label: 'Reject',
+                                          icon: Icons.cancel_outlined,
+                                          color: Colors.red,
+                                          onTap: () => _rejectUser(user['id'] as String),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ),
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildStatusChip(String status) {
-    Color color;
-    String label;
-
-    switch (status) {
-      case 'verified':
-        color = AppColors.success;
-        label = 'VERIFIED';
-        break;
-      case 'pending':
-        color = AppColors.warning;
-        label = 'PENDING';
-        break;
-      case 'denied':
-        color = AppColors.error;
-        label = 'DENIED';
-        break;
-      default:
-        color = AppColors.mutedText;
-        label = 'UNKNOWN';
-    }
-
-    return Chip(
-      label: Text(label, style: GoogleFonts.inter(fontSize: 10, color: Colors.white)),
-      backgroundColor: color,
-      padding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
+  Widget _buildModerationTab() {
+    return _Card(
+      title: 'Reports & Moderation Queue',
+      child: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : moderationReports.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 100),
+                    child: Text(
+                      'No pending reports at the moment.',
+                      style: GoogleFonts.inter(fontSize: 17, color: AppColors.mutedText),
+                    ),
+                  ),
+                )
+              : Column(
+                  children: moderationReports.map((report) {
+                    final color = report['severityColor'] as Color;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 20),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: color.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Icon(Icons.warning_amber, color: color, size: 28),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      report['type'] as String,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w700,
+                                        color: color,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: color.withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: Text(
+                                        (report['priority'] as String).toUpperCase(),
+                                        style: GoogleFonts.inter(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: color,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Reported by ${report['reportedBy']} • ${report['timeAgo']}',
+                                  style: GoogleFonts.inter(fontSize: 13, color: AppColors.mutedText),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  report['snippet'] as String,
+                                  style: GoogleFonts.inter(fontSize: 14),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                  'Offender: ${report['offender']}',
+                                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Column(
+                            children: [
+                              _ActionChip(
+                                label: 'View History',
+                                icon: Icons.history,
+                                color: AppColors.brandRed,
+                                onTap: () {},
+                              ),
+                              const SizedBox(height: 10),
+                              _ActionChip(
+                                label: 'Warn User',
+                                icon: Icons.warning_amber,
+                                color: Colors.orange,
+                                onTap: () {},
+                              ),
+                              const SizedBox(height: 10),
+                              _ActionChip(
+                                label: 'Remove & Ban',
+                                icon: Icons.block,
+                                color: Colors.red,
+                                onTap: () {},
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
     );
   }
 
-  void _showImages(Map<String, dynamic> user) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('User Images'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+  // ── Reusable components ────────────────────────────────────────────────────────
+
+  Widget _TabButton({required String label, required bool active}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+      decoration: BoxDecoration(
+        color: active ? AppColors.brandRed : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: active ? AppColors.brandRed : AppColors.borderSubtle),
+        boxShadow: active
+            ? [BoxShadow(color: AppColors.brandRed.withOpacity(0.25), blurRadius: 12, offset: const Offset(0, 6))]
+            : null,
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          color: active ? Colors.white : AppColors.darkText,
+          fontWeight: FontWeight.w600,
+          fontSize: 15,
+        ),
+      ),
+    );
+  }
+
+  Widget _Card({
+    required String title,
+    bool search = false,
+    Widget? child,
+    Color? accentColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              if (user['profilePhotoUrl'] != null) ...[
-                const Text('Profile Photo:'),
-                Image.network(user['profilePhotoUrl'] as String, height: 200, errorBuilder: (_, __, ___) => const Text('Error loading image')),
-                const SizedBox(height: 16),
+              Text(
+                title,
+                style: GoogleFonts.cormorantGaramond(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w400,
+                  color: accentColor ?? AppColors.darkText,
+                ),
+              ),
+              if (search) ...[
+                const Spacer(),
+                SizedBox(
+                  width: 300,
+                  child: TextField(
+                    decoration: InputDecoration(
+                      hintText: 'Search by name or degree...',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      filled: true,
+                      fillColor: AppColors.softWhite,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                    ),
+                  ),
+                ),
               ],
-              if (user['idPhotoFrontUrl'] != null) ...[
-                const Text('ID Front:'),
-                Image.network(user['idPhotoFrontUrl'] as String, height: 200, errorBuilder: (_, __, ___) => const Text('Error loading image')),
-                const SizedBox(height: 16),
-              ],
-              if (user['idPhotoBackUrl'] != null) ...[
-                const Text('ID Back:'),
-                Image.network(user['idPhotoBackUrl'] as String, height: 200, errorBuilder: (_, __, ___) => const Text('Error loading image')),
-              ],
-              if (user['profilePhotoUrl'] == null && user['idPhotoFrontUrl'] == null && user['idPhotoBackUrl'] == null)
-                const Text('No images available', style: TextStyle(color: Colors.grey)),
             ],
           ),
+          const SizedBox(height: 28),
+          if (child != null) child,
+        ],
+      ),
+    );
+  }
+
+  Widget _StatRow({
+    required String label,
+    required String value,
+    double? progress,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 13,
+            color: AppColors.mutedText,
+            fontWeight: FontWeight.w500,
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
+        const SizedBox(height: 8),
+        Text(
+          value,
+          style: GoogleFonts.cormorantGaramond(
+            fontSize: 36,
+            fontWeight: FontWeight.w300,
+            color: AppColors.darkText,
+          ),
+        ),
+        if (progress != null) ...[
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: progress.clamp(0.0, 1.0),
+              backgroundColor: AppColors.softWhite,
+              color: AppColors.brandRed,
+              minHeight: 10,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _AlertItem({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.red.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.red.withOpacity(0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.red, size: 28),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.inter(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.red,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.inter(fontSize: 14, color: AppColors.mutedText),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
-}
 
-class _HeaderLabel extends StatelessWidget {
-  final String text;
-
-  const _HeaderLabel(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: GoogleFonts.inter(
-        fontSize: 10.5,
-        letterSpacing: 1.2,
-        fontWeight: FontWeight.bold,
-        color: AppColors.mutedText,
+  Widget _ActionChip({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(width: 10),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                color: color,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
-}
 
-Widget _ActionButton(String label, IconData icon, Color color, VoidCallback onPressed) {
-  return TextButton.icon(
-    onPressed: onPressed,
-    icon: Icon(icon, size: 18, color: color),
-    label: Text(
-      label,
-      style: GoogleFonts.inter(
-        fontSize: 11.5,
-        color: color,
-        fontWeight: FontWeight.w600,
+  void _showUserDocs(Map<String, dynamic> user) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${user['name']} - Documents'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (user['profilePhoto'] != null) ...[
+                const Text('Profile Photo:'),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(user['profilePhoto'], height: 180, fit: BoxFit.cover),
+                ),
+                const SizedBox(height: 24),
+              ],
+              if (user['idFront'] != null) ...[
+                const Text('ID Front:'),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(user['idFront'], height: 180, fit: BoxFit.cover),
+                ),
+                const SizedBox(height: 24),
+              ],
+              if (user['idBack'] != null) ...[
+                const Text('ID Back:'),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(user['idBack'], height: 180, fit: BoxFit.cover),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
       ),
-    ),
-    style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6)),
-  );
+    );
+  }
+
+  // Sidebar helpers ──────────────────────────────────────────────────────────────
+  Widget _buildSidebarSection(String title, List<Widget> items) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.inter(
+            fontSize: 10,
+            letterSpacing: 2,
+            fontWeight: FontWeight.bold,
+            color: AppColors.mutedText.withOpacity(0.7),
+          ),
+        ),
+        const SizedBox(height: 16),
+        ...items,
+      ],
+    );
+  }
+
+  Widget _SidebarItem({required String label, bool isActive = false, String? route}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: GestureDetector(
+        onTap: route != null ? () => Navigator.pushNamed(context, route) : null,
+        child: MouseRegion(
+          cursor: route != null ? SystemMouseCursors.click : SystemMouseCursors.basic,
+          child: Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 13.5,
+              color: isActive ? AppColors.brandRed : AppColors.darkText,
+              fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

@@ -53,6 +53,7 @@ class MyApp extends StatelessWidget {
         '/reunions_events': (context) => const ReunionAndEventsScreen(),
         '/career_milestones': (context) => const CareerMilestonesScreen(),
         '/announcement_management': (context) => const AnnouncementManagementScreen(),
+        '/admin_dashboard': (context) => const AdminDashboardWeb(),
       },
     );
   }

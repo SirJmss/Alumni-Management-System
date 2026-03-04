@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:alumni/core/constants/app_colors.dart'; // adjust import if needed
 
 class ChapterManagementScreen extends StatefulWidget {
   const ChapterManagementScreen({super.key});
@@ -13,194 +12,693 @@ class ChapterManagementScreen extends StatefulWidget {
 }
 
 class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  // Design system — matching your admin dashboard style
+  static const Color brandRed = Color(0xFF991B1B);
+  static const Color softWhite = Color(0xFFFDFDFD);
+  static const Color darkText = Color(0xFF111827);
+  static const Color mutedText = Color(0xFF6B7280);
+  static const Color borderSubtle = Color(0xFFE5E7EB);
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() {
+      setState(() => _searchQuery = _searchController.text.trim().toLowerCase());
+    });
+
+    // Optional: run once on init to help debug field names
+    _debugFirestoreFields();
+  }
+
+  Future<void> _debugFirestoreFields() async {
+    // Events debug
+    try {
+      final eventsSnap = await FirebaseFirestore.instance.collection('events').limit(5).get();
+      debugPrint('=== EVENTS DEBUG ===');
+      for (var doc in eventsSnap.docs) {
+        debugPrint('Event ${doc.id}: status=${doc['status']}, date=${doc['date']}, title=${doc['title']}');
+      }
+    } catch (e) {
+      debugPrint('Events debug error: $e');
+    }
+
+    // Users debug
+    try {
+      final usersSnap = await FirebaseFirestore.instance.collection('users').limit(5).get();
+      debugPrint('=== USERS DEBUG ===');
+      for (var doc in usersSnap.docs) {
+        debugPrint('User ${doc.id}: status=${doc['status']}, name=${doc['name']}, fullName=${doc['fullName']}');
+      }
+    } catch (e) {
+      debugPrint('Users debug error: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final horizontalPadding = (size.width * 0.04).clamp(32.0, 80.0);
+    final verticalPadding = (size.height * 0.025).clamp(40.0, 72.0);
+
     return Scaffold(
-      backgroundColor: AppColors.softWhite,
-      appBar: AppBar(
-        backgroundColor: AppColors.cardWhite,
-        elevation: 0,
-        title: Text(
-          'Chapter Management',
-          style: GoogleFonts.cormorantGaramond(
-            fontSize: 26,
-            fontWeight: FontWeight.w300,
-            color: AppColors.darkText,
+      backgroundColor: softWhite,
+      body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Sidebar – now clickable
+          Container(
+            width: size.width < 1100 ? 260.0 : 300.0,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(right: BorderSide(color: borderSubtle, width: 0.5)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'ALUMNI',
+                        style: GoogleFonts.cormorantGaramond(
+                          fontSize: 22,
+                          letterSpacing: 6,
+                          color: brandRed,
+                          fontWeight: FontWeight.w300,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'ARCHIVE PORTAL',
+                        style: GoogleFonts.inter(
+                          fontSize: 9,
+                          letterSpacing: 2,
+                          color: mutedText,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildSidebarSection('NETWORK', [
+                          _SidebarItem(label: 'Overview', route: '/admin_dashboard'),
+                          _SidebarItem(label: 'Chapter Management', isActive: true, route: '/chapter_management'),
+                        ]),
+                        const SizedBox(height: 32),
+                        _buildSidebarSection('ENGAGEMENT', [
+                          _SidebarItem(label: 'Reunions & Events', route: '/reunions_events'),
+                          _SidebarItem(label: 'Career Milestones', route: '/career_milestones'),
+                        ]),
+                        const SizedBox(height: 32),
+                        _buildSidebarSection('ADMIN FEATURES', [
+                          _SidebarItem(label: 'User Verification & Moderation', route: '/user_verification_moderation'),
+                          _SidebarItem(label: 'Event Planning', route: '/event_planning'),
+                          _SidebarItem(label: 'Job Board Management', route: '/job_board_management'),
+                          _SidebarItem(label: 'Growth Metrics', route: '/growth_metrics'),
+                          _SidebarItem(label: 'Announcement Management', route: '/announcement_management'),
+                        ]),
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(32),
+                  decoration: BoxDecoration(
+                    border: Border(top: BorderSide(color: borderSubtle.withOpacity(0.3))),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 16,
+                            backgroundColor: brandRed,
+                            child: Text('A', style: GoogleFonts.cormorantGaramond(color: Colors.white, fontSize: 14)),
+                          ),
+                          const SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Registrar Admin', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold)),
+                              Text('NETWORK OVERSEER', style: GoogleFonts.inter(fontSize: 9, color: mutedText)),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      TextButton(
+                        onPressed: () async {
+                          await FirebaseAuth.instance.signOut();
+                          if (mounted) Navigator.pushReplacementNamed(context, '/');
+                        },
+                        child: Text(
+                          'DISCONNECT',
+                          style: GoogleFonts.inter(fontSize: 10, letterSpacing: 2, color: mutedText, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 24),
-            child: FilledButton.icon(
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('New Chapter'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.brandRed,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          // Main content
+          Expanded(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: horizontalPadding,
+                  vertical: verticalPadding,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Chapter Oversight.',
+                      style: GoogleFonts.cormorantGaramond(
+                        fontSize: 44,
+                        fontWeight: FontWeight.w300,
+                        fontStyle: FontStyle.italic,
+                        color: darkText,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'COORDINATION HUB',
+                      style: GoogleFonts.inter(
+                        fontSize: 10,
+                        letterSpacing: 2,
+                        fontWeight: FontWeight.bold,
+                        color: mutedText,
+                      ),
+                    ),
+                    const SizedBox(height: 48),
+                    // Stats
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        int count = 4;
+                        if (constraints.maxWidth < 1200) count = 2;
+                        if (constraints.maxWidth < 700) count = 1;
+                        return GridView.count(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          crossAxisCount: count,
+                          crossAxisSpacing: 24,
+                          mainAxisSpacing: 24,
+                          childAspectRatio: count >= 3 ? 1.8 : 2.1,
+                          children: [
+                            _StatCard('ACTIVE HUBS', '24', 'Global'),
+                            _StatCard('ENGAGEMENT', '78%', 'Avg. Activity', Colors.green),
+                            _StatCard('MENTORS', '142', 'Chapter-led'),
+                            _StatCard('ATTENDANCE', '4.2k', 'YTD Events'),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 56),
+                    // Chapter Registry section
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Chapter Registry',
+                          style: GoogleFonts.cormorantGaramond(fontSize: 28),
+                        ),
+                        Row(
+                          children: [
+                            SizedBox(
+                              width: 340,
+                              child: TextField(
+                                controller: _searchController,
+                                decoration: InputDecoration(
+                                  hintText: 'Search chapters…',
+                                  hintStyle: GoogleFonts.inter(color: mutedText, fontSize: 13),
+                                  prefixIcon: Icon(Icons.search, color: mutedText, size: 20),
+                                  filled: true,
+                                  fillColor: Colors.white,
+                                  border: OutlineInputBorder(
+                                    borderSide: BorderSide(color: borderSubtle),
+                                    borderRadius: BorderRadius.circular(0),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 24),
+                            OutlinedButton.icon(
+                              icon: const Icon(Icons.add, size: 18),
+                              label: const Text('ESTABLISH NEW'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: brandRed,
+                                side: const BorderSide(color: brandRed),
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                                shape: const RoundedRectangleBorder(),
+                              ),
+                              onPressed: () => _showChapterForm(),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 32),
+                    Container(
+                      decoration: BoxDecoration(border: Border.all(color: borderSubtle)),
+                      child: StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('chapters')
+                            .orderBy('createdAt', descending: true)
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return const Padding(
+                              padding: EdgeInsets.all(80),
+                              child: Center(child: CircularProgressIndicator(color: brandRed)),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            debugPrint('Chapters stream error: ${snapshot.error}');
+                            return Padding(
+                              padding: const EdgeInsets.all(80),
+                              child: Text('Error loading chapters: ${snapshot.error}', style: GoogleFonts.inter(color: brandRed)),
+                            );
+                          }
+                          final chapters = snapshot.data?.docs ?? [];
+                          final filtered = chapters.where((doc) {
+                            final data = doc.data() as Map<String, dynamic>;
+                            final name = (data['name'] as String?)?.toLowerCase() ?? '';
+                            return name.contains(_searchQuery);
+                          }).toList();
+                          if (filtered.isEmpty) {
+                            return Padding(
+                              padding: const EdgeInsets.all(80),
+                              child: Text('No chapters found', style: GoogleFonts.inter(fontSize: 15, color: mutedText)),
+                            );
+                          }
+                          return Column(
+                            children: filtered.map((doc) {
+                              final data = doc.data() as Map<String, dynamic>;
+                              final name = data['name'] ?? 'Unnamed Chapter';
+                              final region = data['region'] ?? data['location'] ?? 'N/A';
+                              final leadUid = data['presidentUid'] as String?;
+                              final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+                              return FutureBuilder<int>(
+                                future: _getMemberCount(doc.id),
+                                builder: (context, countSnap) {
+                                  final count = countSnap.data ?? 0;
+                                  return FutureBuilder<String>(
+                                    future: leadUid != null && leadUid.isNotEmpty
+                                        ? _getUserName(leadUid)
+                                        : Future.value('None'),
+                                    builder: (context, leadSnap) {
+                                      final leadName = leadSnap.data ?? 'None';
+                                      return Container(
+                                        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                                        decoration: BoxDecoration(
+                                          border: Border(bottom: BorderSide(color: borderSubtle)),
+                                        ),
+                                        child: IntrinsicHeight(
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                flex: 4,
+                                                child: Padding(
+                                                  padding: const EdgeInsets.only(right: 8.0),
+                                                  child: Text(
+                                                    name,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    maxLines: 1,
+                                                    softWrap: false,
+                                                    style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 14.5),
+                                                  ),
+                                                ),
+                                              ),
+                                              Expanded(
+                                                flex: 2,
+                                                child: Padding(
+                                                  padding: const EdgeInsets.only(right: 8.0),
+                                                  child: Text(
+                                                    region,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    maxLines: 1,
+                                                    softWrap: false,
+                                                    style: GoogleFonts.inter(fontSize: 13, color: mutedText),
+                                                  ),
+                                                ),
+                                              ),
+                                              Expanded(
+                                                flex: 2,
+                                                child: Padding(
+                                                  padding: const EdgeInsets.only(right: 8.0),
+                                                  child: Text(
+                                                    leadName,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    maxLines: 1,
+                                                    softWrap: false,
+                                                    style: GoogleFonts.inter(fontSize: 13),
+                                                  ),
+                                                ),
+                                              ),
+                                              Expanded(
+                                                flex: 2,
+                                                child: Padding(
+                                                  padding: const EdgeInsets.only(right: 8.0),
+                                                  child: Text(
+                                                    '$count Alumni',
+                                                    overflow: TextOverflow.ellipsis,
+                                                    maxLines: 1,
+                                                    softWrap: false,
+                                                    style: GoogleFonts.inter(
+                                                      fontSize: 13,
+                                                      color: count > 0 ? Colors.green.shade700 : mutedText,
+                                                      fontWeight: FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              Expanded(
+                                                flex: 2,
+                                                child: Padding(
+                                                  padding: const EdgeInsets.only(right: 8.0),
+                                                  child: Text(
+                                                    createdAt != null ? DateFormat('MMM dd, yyyy').format(createdAt) : 'N/A',
+                                                    overflow: TextOverflow.ellipsis,
+                                                    maxLines: 1,
+                                                    softWrap: false,
+                                                    style: GoogleFonts.inter(fontSize: 13, color: mutedText),
+                                                  ),
+                                                ),
+                                              ),
+                                              Expanded(
+                                                flex: 1,
+                                                child: Row(
+                                                  mainAxisAlignment: MainAxisAlignment.end,
+                                                  children: [
+                                                    IconButton(
+                                                      icon: Icon(Icons.edit_outlined, color: mutedText, size: 20),
+                                                      onPressed: () => _showChapterForm(chapterId: doc.id, initialData: data),
+                                                    ),
+                                                    IconButton(
+                                                      icon: Icon(Icons.delete_outline, color: mutedText, size: 20),
+                                                      onPressed: () => _confirmDeleteChapter(doc.id, name),
+                                                    ),
+                                                    IconButton(
+                                                      icon: Icon(Icons.group_outlined, color: mutedText, size: 20),
+                                                      onPressed: () => _showMembersDialog(doc.id, name),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  );
+                                },
+                              );
+                            }).toList(),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              onPressed: () => _showChapterForm(),
+            ),
+          ),
+          // Right sidebar – now dynamic
+          Container(
+            width: 380,
+            color: Colors.white,
+            padding: const EdgeInsets.fromLTRB(40, 56, 40, 40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Reunions / Events – approved only
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Reunions & Events',
+                      style: GoogleFonts.cormorantGaramond(fontSize: 26),
+                    ),
+                    Text(
+                      'VIEW ALL',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: brandRed,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('events')
+                      // .where('status', isEqualTo: 'approved')  // commented – adjust after checking real value
+                      .orderBy('createdAt', descending: true) // fallback
+                      .limit(8)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator(color: brandRed));
+                    }
+                    if (snapshot.hasError) {
+                      debugPrint('Events stream error: ${snapshot.error}');
+                      return Text('Error loading events: ${snapshot.error}', style: GoogleFonts.inter(color: Colors.red));
+                    }
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      return Text('No events found\n(check console for debug info)', style: GoogleFonts.inter(color: mutedText));
+                    }
+                    final events = snapshot.data!.docs;
+                    return Column(
+                      children: events.map((doc) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        final title = data['title'] ?? 'Untitled Event';
+                        final location = data['location'] ?? '';
+                        final dateField = data['date'] ?? data['createdAt'] ?? data['eventDate'];
+                        final dateStr = dateField is Timestamp
+                            ? DateFormat('MMM d').format(dateField.toDate())
+                            : '—';
+                        final status = (data['status'] as String?)?.toLowerCase() ?? 'unknown';
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                                    if (location.isNotEmpty)
+                                      Text(location, style: GoogleFonts.inter(fontSize: 13, color: mutedText)),
+                                    Text('Status: $status', style: GoogleFonts.inter(fontSize: 11, color: mutedText)),
+                                  ],
+                                ),
+                              ),
+                              Text(dateStr, style: GoogleFonts.inter(fontSize: 13, color: mutedText)),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  },
+                ),
+                const SizedBox(height: 64),
+                // Mentorship Matches – all verified users
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Verified Mentor',
+                      style: GoogleFonts.cormorantGaramond(fontSize: 26),
+                    ),
+                    Text(
+                      'MATCH NEW PAIR',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: brandRed,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('users')
+                      // .where('status', isEqualTo: 'verified')  // commented – adjust after debug
+                      .orderBy('createdAt', descending: true) // fallback
+                      .limit(12)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator(color: brandRed));
+                    }
+                    if (snapshot.hasError) {
+                      debugPrint('Users stream error: ${snapshot.error}');
+                      return Text('Error loading users: ${snapshot.error}', style: GoogleFonts.inter(color: Colors.red));
+                    }
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      return Text('No users found\n(check console for debug info)', style: GoogleFonts.inter(color: mutedText));
+                    }
+                    final users = snapshot.data!.docs;
+                    return Column(
+                      children: users.map((doc) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        final name = data['name'] ?? data['fullName'] ?? 'Unknown';
+                        final role = data['role'] ?? data['position'] ?? 'Alumni';
+                        final statusRaw = data['status'] ?? 'unknown';
+                        final status = (statusRaw is String) ? statusRaw.toLowerCase() : 'unknown';
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(name, style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                                    Text(role, style: GoogleFonts.inter(fontSize: 13, color: mutedText)),
+                                    Text('Status: $status', style: GoogleFonts.inter(fontSize: 11, color: mutedText)),
+                                  ],
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: status.contains('verified') || status.contains('active')
+                                      ? Colors.green.withOpacity(0.08)
+                                      : Colors.blue.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                                child: Text(
+                                  status.toUpperCase(),
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: status.contains('verified') || status.contains('active')
+                                        ? Colors.green.shade700
+                                        : Colors.blue.shade700,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    );
+                  },
+                ),
+              ],
             ),
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'All Chapters',
-              style: GoogleFonts.cormorantGaramond(fontSize: 24, color: AppColors.darkText),
+    );
+  }
+
+  Widget _buildSidebarSection(String title, List<Widget> items) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.inter(
+            fontSize: 10,
+            letterSpacing: 2,
+            fontWeight: FontWeight.bold,
+            color: mutedText.withOpacity(0.7),
+          ),
+        ),
+        const SizedBox(height: 16),
+        ...items,
+      ],
+    );
+  }
+
+  Widget _SidebarItem({required String label, bool isActive = false, String? route}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: GestureDetector(
+        onTap: route != null
+            ? () {
+                Navigator.pushNamed(context, route);
+              }
+            : null,
+        child: MouseRegion(
+          cursor: route != null ? SystemMouseCursors.click : SystemMouseCursors.basic,
+          child: Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 13.5,
+              color: isActive ? brandRed : darkText,
+              fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Manage alumni chapters, leaders, and members',
-              style: GoogleFonts.inter(fontSize: 14, color: AppColors.mutedText),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _StatCard(String title, String value, String subtitle, [Color? accentColor]) {
+    return Container(
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            title.toUpperCase(),
+            style: GoogleFonts.inter(
+              fontSize: 10,
+              letterSpacing: 1.5,
+              color: mutedText,
+              fontWeight: FontWeight.bold,
             ),
-            const SizedBox(height: 24),
-
-            Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('chapters')
-                    .orderBy('createdAt', descending: true)
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (snapshot.hasError) {
-                    return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.red)));
-                  }
-
-                  final chapters = snapshot.data?.docs ?? [];
-
-                  if (chapters.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.group_off, size: 64, color: Colors.grey),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No chapters created yet',
-                            style: GoogleFonts.inter(fontSize: 18, color: Colors.grey[700]),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Click "New Chapter" to add one',
-                            style: GoogleFonts.inter(fontSize: 14, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  return ListView.builder(
-                    itemCount: chapters.length,
-                    itemBuilder: (context, index) {
-                      final doc = chapters[index];
-                      final data = doc.data() as Map<String, dynamic>;
-
-                      final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
-                      final presidentUid = data['presidentUid'] as String?;
-
-                      return FutureBuilder<int>(
-                        future: _getMemberCount(doc.id),
-                        builder: (context, memberSnap) {
-                          final memberCount = memberSnap.data ?? 0;
-
-                          return FutureBuilder<String>(
-                            future: presidentUid != null && presidentUid.isNotEmpty
-                                ? _getUserName(presidentUid)
-                                : Future.value('None'),
-                            builder: (context, presidentSnap) {
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 12),
-                                elevation: 1,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                child: ListTile(
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                  leading: CircleAvatar(
-                                    radius: 28,
-                                    backgroundColor: AppColors.brandRed.withOpacity(0.15),
-                                    child: const Icon(Icons.group, color: AppColors.brandRed),
-                                  ),
-                                  title: Text(
-                                    data['name'] ?? 'Unnamed Chapter',
-                                    style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16),
-                                  ),
-                                  subtitle: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        data['description']?.toString() ?? 'No description',
-                                        style: GoogleFonts.inter(fontSize: 13, color: AppColors.mutedText),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Row(
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                            decoration: BoxDecoration(
-                                              color: AppColors.success.withOpacity(0.1),
-                                              borderRadius: BorderRadius.circular(12),
-                                            ),
-                                            child: Text(
-                                              '$memberCount members',
-                                              style: GoogleFonts.inter(fontSize: 11, color: AppColors.success, fontWeight: FontWeight.w600),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Text(
-                                            'President: ${presidentSnap.data ?? 'None'}',
-                                            style: GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          if (createdAt != null)
-                                            Text(
-                                              'Created ${DateFormat('MMM dd, yyyy').format(createdAt)}',
-                                              style: GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText),
-                                            ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(Icons.edit_outlined, size: 22),
-                                        tooltip: 'Edit',
-                                        onPressed: () => _showChapterForm(chapterId: doc.id, initialData: data),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete_outline, size: 22, color: Colors.redAccent),
-                                        tooltip: 'Delete',
-                                        onPressed: () => _confirmDeleteChapter(doc.id, data['name'] ?? 'this chapter'),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.people_alt_outlined, size: 22),
-                                        tooltip: 'View Members',
-                                        onPressed: () => _showMembersDialog(doc.id, data['name'] ?? 'Chapter'),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      );
-                    },
-                  );
-                },
+          ),
+          const SizedBox(height: 12),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: GoogleFonts.cormorantGaramond(
+                fontSize: 42,
+                fontWeight: FontWeight.w300,
+                color: accentColor ?? darkText,
               ),
             ),
-          ],
-        ),
+          ),
+          Text(
+            subtitle,
+            style: GoogleFonts.inter(fontSize: 11, color: mutedText),
+          ),
+        ],
       ),
     );
   }
@@ -224,9 +722,9 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
     try {
       final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
       final data = userDoc.data();
-      return data?['name'] ?? data?['fullName'] ?? data?['email']?.split('@')[0] ?? 'Unknown';
+      return data?['name'] ?? data?['fullName'] ?? data?['email']?.split('@')[0] ?? 'None';
     } catch (e) {
-      return 'Unknown';
+      return 'None';
     }
   }
 
@@ -235,7 +733,6 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
     final nameCtrl = TextEditingController(text: initialData?['name'] ?? '');
     final descCtrl = TextEditingController(text: initialData?['description'] ?? '');
     final locationCtrl = TextEditingController(text: initialData?['location'] ?? '');
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -262,6 +759,7 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFE64646)),
             onPressed: () async {
               if (nameCtrl.text.trim().isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -269,7 +767,6 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
                 );
                 return;
               }
-
               final data = {
                 'name': nameCtrl.text.trim(),
                 'description': descCtrl.text.trim(),
@@ -280,14 +777,12 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
                   'createdBy': FirebaseAuth.instance.currentUser?.uid,
                 },
               };
-
               try {
                 if (isEdit) {
                   await FirebaseFirestore.instance.collection('chapters').doc(chapterId).update(data);
                 } else {
                   await FirebaseFirestore.instance.collection('chapters').add(data);
                 }
-
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
@@ -323,23 +818,19 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
         ],
       ),
     );
-
     if (confirm == true) {
       try {
         await FirebaseFirestore.instance.collection('chapters').doc(chapterId).delete();
-
         final membersSnap = await FirebaseFirestore.instance
             .collection('chapters')
             .doc(chapterId)
             .collection('members')
             .get();
-
         final batch = FirebaseFirestore.instance.batch();
         for (final doc in membersSnap.docs) {
           batch.delete(doc.reference);
         }
         await batch.commit();
-
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Chapter and members deleted'), backgroundColor: Colors.green),
         );
@@ -363,7 +854,7 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
               icon: const Icon(Icons.person_add, size: 18),
               label: const Text('Add Member'),
               style: FilledButton.styleFrom(
-                backgroundColor: AppColors.brandRed,
+                backgroundColor: const Color(0xFFE64646),
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               ),
               onPressed: () => _showAddMemberDialog(chapterId),
@@ -387,20 +878,16 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
               if (snapshot.hasError) {
                 return Center(child: Text('Error: ${snapshot.error}'));
               }
-
               final memberDocs = snapshot.data?.docs ?? [];
-
               if (memberDocs.isEmpty) {
                 return const Center(child: Text('No members in this chapter yet'));
               }
-
               return ListView.builder(
                 itemCount: memberDocs.length,
                 itemBuilder: (context, index) {
                   final memberDoc = memberDocs[index];
                   final memberData = memberDoc.data() as Map<String, dynamic>;
                   final uid = memberDoc.id;
-
                   return FutureBuilder<Map<String, dynamic>>(
                     future: _fetchUserDetails(uid),
                     builder: (context, userSnap) {
@@ -408,15 +895,13 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
                         return const ListTile(title: Text('Loading...'));
                       }
                       final user = userSnap.data ?? {'name': 'Unknown', 'email': 'No email'};
-
                       final isPresident = memberData['role'] == 'president';
-
                       return ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: isPresident ? AppColors.brandRed : AppColors.brandRed.withOpacity(0.1),
+                          backgroundColor: isPresident ? brandRed : brandRed.withOpacity(0.1),
                           child: Text(
                             user['name']?[0] ?? '?',
-                            style: TextStyle(color: isPresident ? Colors.white : AppColors.brandRed),
+                            style: TextStyle(color: isPresident ? Colors.white : brandRed),
                           ),
                         ),
                         title: Text(user['name'] ?? 'Unknown'),
@@ -429,7 +914,7 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w500,
-                                color: isPresident ? AppColors.brandRed : null,
+                                color: isPresident ? brandRed : null,
                               ),
                             ),
                             if (memberData['joinedAt'] != null)
@@ -444,7 +929,7 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
                           children: [
                             if (!isPresident)
                               IconButton(
-                                icon: const Icon(Icons.star_border, color: AppColors.brandRed, size: 22),
+                                icon: Icon(Icons.star_border, color: brandRed, size: 22),
                                 tooltip: 'Set as President',
                                 onPressed: () => _setAsPresident(chapterId, uid, user['name'] ?? 'this member'),
                               ),
@@ -485,15 +970,11 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
         ],
       ),
     );
-
     if (confirm != true) return;
-
     try {
       final chapterRef = FirebaseFirestore.instance.collection('chapters').doc(chapterId);
       final chapterDoc = await chapterRef.get();
       final currentPresidentUid = chapterDoc.data()?['presidentUid'] as String?;
-
-      // Safety: only downgrade if there's a valid different president
       if (currentPresidentUid != null &&
           currentPresidentUid != userUid &&
           currentPresidentUid.isNotEmpty) {
@@ -504,21 +985,16 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
             .doc(currentPresidentUid)
             .update({'role': 'member'});
       }
-
-      // Set new president role
       await FirebaseFirestore.instance
           .collection('chapters')
           .doc(chapterId)
           .collection('members')
           .doc(userUid)
           .update({'role': 'president'});
-
-      // Update chapter doc
       await chapterRef.update({
         'presidentUid': userUid,
         'updatedAt': FieldValue.serverTimestamp(),
       });
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$userName is now the president'), backgroundColor: Colors.green),
       );
@@ -532,7 +1008,6 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
   void _showAddMemberDialog(String chapterId) {
     final searchCtrl = TextEditingController();
     List<Map<String, dynamic>> searchResults = [];
-
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -551,23 +1026,19 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
                       icon: const Icon(Icons.search),
                       onPressed: () async {
                         if (searchCtrl.text.trim().isEmpty) return;
-
                         final query = searchCtrl.text.trim().toLowerCase();
-
                         final nameSnap = await FirebaseFirestore.instance
                             .collection('users')
                             .where('name', isGreaterThanOrEqualTo: query)
                             .where('name', isLessThanOrEqualTo: '$query\uf8ff')
                             .limit(10)
                             .get();
-
                         final emailSnap = await FirebaseFirestore.instance
                             .collection('users')
                             .where('email', isGreaterThanOrEqualTo: query)
                             .where('email', isLessThanOrEqualTo: '$query\uf8ff')
                             .limit(10)
                             .get();
-
                         final results = [...nameSnap.docs, ...emailSnap.docs]
                             .map((doc) => {
                                   'uid': doc.id,
@@ -576,7 +1047,6 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
                                 })
                             .toSet()
                             .toList();
-
                         setDialogState(() => searchResults = results);
                       },
                     ),
@@ -595,7 +1065,7 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
                               title: Text(user['name']),
                               subtitle: Text(user['email']),
                               trailing: IconButton(
-                                icon: const Icon(Icons.add_circle_outline, color: AppColors.success),
+                                icon: const Icon(Icons.add_circle_outline, color: Color(0xFF4CAF50)),
                                 onPressed: () => _addMemberToChapter(chapterId, user['uid'], user['name']),
                               ),
                             );
@@ -620,7 +1090,6 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
           .doc(chapterId)
           .collection('members')
           .doc(userUid);
-
       final existing = await memberRef.get();
       if (existing.exists) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -628,14 +1097,12 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
         );
         return;
       }
-
       await memberRef.set({
         'joinedAt': FieldValue.serverTimestamp(),
         'role': 'member',
         'status': 'active',
         'addedBy': FirebaseAuth.instance.currentUser?.uid,
       });
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$userName added to chapter'), backgroundColor: Colors.green),
       );
@@ -674,9 +1141,7 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
         ],
       ),
     );
-
     if (confirm != true) return;
-
     try {
       await FirebaseFirestore.instance
           .collection('chapters')
@@ -684,7 +1149,6 @@ class _ChapterManagementScreenState extends State<ChapterManagementScreen> {
           .collection('members')
           .doc(userUid)
           .delete();
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('$memberName removed from chapter'), backgroundColor: Colors.green),
       );
