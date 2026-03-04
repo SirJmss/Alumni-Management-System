@@ -12,6 +12,8 @@ import 'package:alumni/features/admin/presentation/screens/event_planning_screen
 import 'package:alumni/features/admin/presentation/screens/job_board_management_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/chapter_management_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/reunion_planning_screen.dart';
+import 'package:alumni/features/admin/presentation/screens/career_milestones_screen.dart';
+import 'package:alumni/features/admin/presentation/screens/announcement_management_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -49,6 +51,8 @@ class MyApp extends StatelessWidget {
         '/job_board_management': (context) => const JobBoardManagementScreen(),
         '/chapter_management': (context) => const ChapterManagementScreen(),
         '/reunions_events': (context) => const ReunionAndEventsScreen(),
+        '/career_milestones': (context) => const CareerMilestonesScreen(),
+        '/announcement_management': (context) => const AnnouncementManagementScreen(),
       },
     );
   }

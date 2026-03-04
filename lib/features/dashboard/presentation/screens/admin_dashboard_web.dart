@@ -301,6 +301,7 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
                   _SidebarItem(label: 'Event Planning', route: '/event_planning'),
                   _SidebarItem(label: 'Job Board Management', route: '/job_board_management'),
                   _SidebarItem(label: 'Growth Metrics', route: '/growth_metrics'),
+                   _SidebarItem(label: 'Announcement Management', route: '/announcement_management'),
                 ]),
               ],
             ),
