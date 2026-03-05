@@ -1,7 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart'; // for nice date formatting
+import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
+
+import 'package:alumni/core/constants/app_colors.dart'; // Make sure this file exists
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -22,154 +25,377 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadUserProfile() async {
     final user = FirebaseAuth.instance.currentUser;
-
     if (user == null) {
-      if (mounted) {
-        setState(() => isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Not logged in")),
-        );
-      }
+      if (mounted) setState(() => isLoading = false);
       return;
     }
 
     try {
       final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
 
-      if (doc.exists && mounted) {
-        setState(() {
-          userData = doc.data();
-          isLoading = false;
-        });
-      } else {
-        if (mounted) {
-          setState(() => isLoading = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Profile not found")),
-          );
-        }
-      }
+      if (!mounted) return;
+
+      setState(() {
+        userData = doc.data();
+        isLoading = false;
+      });
     } catch (e) {
-      debugPrint("Error loading profile: $e");
-      if (mounted) {
-        setState(() => isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e")),
-        );
-      }
+      debugPrint('Profile load error: $e');
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
-  String _formatDate(Timestamp? timestamp) {
-    if (timestamp == null) return 'N/A';
-    final date = timestamp.toDate();
-    return DateFormat('MMMM dd, yyyy • hh:mm a').format(date);
+  String _formatPeriod(dynamic start, dynamic end) {
+    final startStr = _formatDate(start);
+    final endStr = _formatDate(end);
+    return end == null ? '$startStr – Present' : '$startStr – $endStr';
+  }
+
+  String _formatDate(dynamic value) {
+    if (value == null) return '—';
+
+    DateTime? date;
+
+    if (value is Timestamp) {
+      date = value.toDate();
+    } else if (value is String) {
+      date = DateTime.tryParse(value);
+    }
+
+    return date != null ? DateFormat('MMMM yyyy').format(date) : '—';
+  }
+
+  String _safe(String key, {String fallback = '—'}) {
+    final val = userData?[key]?.toString()?.trim();
+    return (val != null && val.isNotEmpty) ? val : fallback;
+  }
+
+  String _safeMap(Map<String, dynamic>? map, String key, {String fallback = '—'}) {
+    final val = map?[key]?.toString()?.trim();
+    return (val != null && val.isNotEmpty) ? val : fallback;
   }
 
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: AppColors.brandRed)),
+      );
+    }
+
+    if (userData == null) {
+      return Scaffold(
+        body: Center(
+          child: Text(
+            'Profile not found',
+            style: GoogleFonts.inter(fontSize: 16, color: AppColors.mutedText),
+          ),
+        ),
+      );
+    }
+
+    final coverUrl = _safe('coverPhotoUrl');
+    final avatarUrl = _safe('profilePictureUrl');
+
+    final bool hasCover = coverUrl != '—';
+    final bool hasAvatar = avatarUrl != '—';
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("My Profile"),
-        backgroundColor: Colors.red,
-        foregroundColor: Colors.white,
-      ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : userData == null
-              ? const Center(child: Text("No profile data available"))
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
+      backgroundColor: AppColors.softWhite,
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar(
+            expandedHeight: 240,
+            floating: false,
+            pinned: true,
+            backgroundColor: AppColors.cardWhite,
+            flexibleSpace: FlexibleSpaceBar(
+              background: Stack(
+                fit: StackFit.expand,
+                children: [
+                  hasCover
+                      ? Image.network(
+                          coverUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _defaultCover(),
+                        )
+                      : _defaultCover(),
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.26),
+                          Colors.black.withOpacity(0.05),
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.more_horiz, color: AppColors.darkText),
+                onPressed: () {},
+              ),
+            ],
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                const SizedBox(height: 80),
+                Center(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      // Profile picture placeholder (add real image later)
-                      CircleAvatar(
-                        radius: 60,
-                        backgroundColor: Colors.red.shade100,
-                        child: const Icon(Icons.person, size: 80, color: Colors.red),
+                      Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.cardWhite, width: 5),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black12,
+                              blurRadius: 16,
+                              offset: Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: CircleAvatar(
+                          radius: 70,
+                          backgroundColor: AppColors.borderSubtle,
+                          backgroundImage: hasAvatar ? NetworkImage(avatarUrl) : null,
+                          child: !hasAvatar
+                              ? Icon(
+                                  Icons.person,
+                                  size: 110,
+                                  color: AppColors.brandRed.withOpacity(0.65),
+                                )
+                              : null,
+                        ),
                       ),
                       const SizedBox(height: 24),
-
-                      // Name
                       Text(
-                        userData!['name'] ?? 'Unknown Name',
-                        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                        _safe('name'),
+                        style: GoogleFonts.cormorantGaramond(
+                          fontSize: 36,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _safe('headline', fallback: _safe('role')),
+                        style: GoogleFonts.inter(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 8),
-
-                      // Email
                       Text(
-                        userData!['email'] ?? 'No email',
-                        style: TextStyle(fontSize: 16, color: Colors.grey.shade700),
+                        _safe('location'),
+                        style: GoogleFonts.inter(fontSize: 15, color: AppColors.mutedText),
                       ),
-                      const SizedBox(height: 32),
-
-                      // Details card
-                      Card(
-                        elevation: 4,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildDetailRow(Icons.person, 'Role', userData!['role'] ?? 'alumni'),
-                              const Divider(),
-                              _buildDetailRow(Icons.email, 'Email', userData!['email'] ?? 'N/A'),
-                              const Divider(),
-                              _buildDetailRow(Icons.calendar_today, 'Joined', _formatDate(userData!['createdAt'])),
-                              const Divider(),
-                              _buildDetailRow(Icons.login, 'Last Login', _formatDate(userData!['lastLogin'])),
-                              const Divider(),
-                              _buildDetailRow(Icons.info, 'Status', userData!['status'] ?? 'active'),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 32),
-
-                      // Future: Edit profile button
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          // TODO: Navigate to edit profile screen
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("Edit profile coming soon")),
-                          );
-                        },
-                        icon: const Icon(Icons.edit),
-                        label: const Text("Edit Profile"),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                        ),
+                      const SizedBox(height: 12),
+                      Text(
+                        '• ${_safe('connectionsCount', fallback: '0')} connections • '
+                        '${_safe('followersCount', fallback: '0')} followers',
+                        style: GoogleFonts.inter(fontSize: 14, color: AppColors.mutedText),
                       ),
                     ],
                   ),
                 ),
-    );
-  }
-
-  Widget _buildDetailRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.red, size: 28),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
-                Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500)),
-              ],
+                const SizedBox(height: 40),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Add section'),
+                        onPressed: () {},
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.brandRed,
+                          side: const BorderSide(color: AppColors.brandRed),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.edit, size: 18),
+                        label: const Text('Edit profile'),
+                        onPressed: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Edit profile coming soon')),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.brandRed,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 48),
+                _sectionTitle('About'),
+                const SizedBox(height: 12),
+                Text(
+                  _safe('about', fallback: 'No professional summary added yet.'),
+                  style: GoogleFonts.inter(
+                    fontSize: 15,
+                    height: 1.55,
+                    color: AppColors.darkText,
+                  ),
+                ),
+                const SizedBox(height: 56),
+                _sectionTitle('Experience'),
+                const SizedBox(height: 16),
+                if ((userData?['experience'] as List?)?.isNotEmpty ?? false) ...[
+                  ...List<Map<String, dynamic>>.from(userData!['experience'])
+                      .map((e) => _experienceCard(e)),
+                ] else ...[
+                  _emptyCard('No experience added yet'),
+                ],
+                const SizedBox(height: 56),
+                _sectionTitle('Education'),
+                const SizedBox(height: 16),
+                if ((userData?['education'] as List?)?.isNotEmpty ?? false) ...[
+                  ...List<Map<String, dynamic>>.from(userData!['education'])
+                      .map((e) => _educationCard(e)),
+                ] else ...[
+                  _emptyCard('No education added yet'),
+                ],
+                const SizedBox(height: 100),
+              ]),
             ),
           ),
         ],
       ),
     );
   }
+
+  Widget _defaultCover() => Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppColors.brandRed.withOpacity(0.3),
+              AppColors.softWhite,
+            ],
+          ),
+        ),
+      );
+
+  Widget _sectionTitle(String title) => Text(
+        title,
+        style: GoogleFonts.cormorantGaramond(
+          fontSize: 28,
+          fontWeight: FontWeight.w500,
+          color: AppColors.darkText,
+        ),
+      );
+
+  Widget _experienceCard(Map<String, dynamic> exp) => Card(
+        margin: const EdgeInsets.only(bottom: 20),
+        elevation: 1,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_safeMap(exp, 'title'), style: _titleStyle),
+              const SizedBox(height: 4),
+              Text(_safeMap(exp, 'company'), style: _companyStyle),
+              Text(_formatPeriod(exp['start'], exp['end']), style: _dateStyle),
+              if (_safeMap(exp, 'location') != '—')
+                Text(_safeMap(exp, 'location'), style: _dateStyle),
+              if (_safeMap(exp, 'description') != '—') ...[
+                const SizedBox(height: 12),
+                Text(_safeMap(exp, 'description'), style: _bodyStyle),
+              ],
+            ],
+          ),
+        ),
+      );
+
+  Widget _educationCard(Map<String, dynamic> edu) => Card(
+        margin: const EdgeInsets.only(bottom: 20),
+        elevation: 1,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_safeMap(edu, 'degree'), style: _titleStyle),
+              const SizedBox(height: 4),
+              Text(_safeMap(edu, 'school'), style: _companyStyle),
+              Text(_formatPeriod(edu['start'], edu['end']), style: _dateStyle),
+              if (_safeMap(edu, 'fieldOfStudy') != '—')
+                Text(_safeMap(edu, 'fieldOfStudy'), style: _dateStyle),
+              if (_safeMap(edu, 'grade') != '—')
+                Text(
+                  'Grade: ${_safeMap(edu, 'grade')}',
+                  style: _bodyStyle.copyWith(fontStyle: FontStyle.italic),
+                ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _emptyCard(String msg) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 32),
+        decoration: BoxDecoration(
+          color: AppColors.cardWhite,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.borderSubtle),
+        ),
+        child: Center(
+          child: Text(
+            msg,
+            style: GoogleFonts.inter(fontSize: 15, color: AppColors.mutedText),
+          ),
+        ),
+      );
+
+  // ────────────────────────────────────────────────
+  //  Text Styles (moved here to avoid repetition)
+  // ────────────────────────────────────────────────
+  TextStyle get _titleStyle => GoogleFonts.inter(
+        fontSize: 18,
+        fontWeight: FontWeight.w700,
+        color: AppColors.darkText,
+      );
+
+  TextStyle get _companyStyle => GoogleFonts.inter(
+        fontSize: 16,
+        color: AppColors.brandRed,
+        fontWeight: FontWeight.w600,
+      );
+
+  TextStyle get _dateStyle => GoogleFonts.inter(
+        fontSize: 14,
+        color: AppColors.mutedText,
+      );
+
+  TextStyle get _bodyStyle => GoogleFonts.inter(
+        fontSize: 14.5,
+        height: 1.5,
+        color: AppColors.darkText,
+      );
 }
