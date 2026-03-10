@@ -54,14 +54,40 @@ class _LoginScreenState extends State<LoginScreen> {
 
       final userData = userDoc.data()!;
       final status = userData['status'] as String?;
+      final role = (userData['role'] as String?)?.toLowerCase() ?? 'alumni';
 
+      // ────────────────────────────────────────────────
+      // Web-only restriction: only staff roles allowed
+      // ────────────────────────────────────────────────
+      if (kIsWeb) {
+        final allowedRoles = ['admin', 'registrar', 'moderator'];
+        if (!allowedRoles.contains(role)) {
+          await auth.signOut();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Web access is restricted to admins, registrars, and moderators only.\n'
+                  'Please use the mobile app if you are an alumni.',
+                ),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 6),
+              ),
+            );
+          }
+          return;
+        }
+      }
+
+      // Common restriction: pending accounts
       if (status == 'pending_review' || status == 'pending') {
         await auth.signOut();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Your account is pending approval.\nPlease wait for committee review.',
+                'Your account is pending approval.\n'
+                'Please wait for committee review.',
               ),
               backgroundColor: Colors.orange,
               duration: Duration(seconds: 5),
@@ -78,8 +104,6 @@ class _LoginScreenState extends State<LoginScreen> {
       });
 
       // Role-based navigation
-      final role = userData['role'] as String? ?? 'alumni';
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
