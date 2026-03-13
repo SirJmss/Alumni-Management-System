@@ -6,14 +6,21 @@ import 'package:intl/intl.dart';
 
 import 'package:alumni/core/constants/app_colors.dart';
 
-class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+class AlumniProfileScreen extends StatefulWidget {
+  const AlumniProfileScreen({super.key});
 
   @override
-  State<ProfileScreen> createState() => _ProfileScreenState();
+  State<AlumniProfileScreen> createState() => _AlumniProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
+  // Brand Colors
+  final Color brandRed = const Color(0xFF991B1B);
+  final Color backgroundGray = const Color(0xFFF3F4F6);
+  final Color darkText = const Color(0xFF111827);
+  final Color mutedText = const Color(0xFF6B7280);
+
+  // Firestore State
   Map<String, dynamic>? userData;
   bool isLoading = true;
 

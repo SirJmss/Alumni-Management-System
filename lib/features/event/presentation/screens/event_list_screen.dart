@@ -1,9 +1,11 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'event_screen.dart';
-import 'add_event_screen.dart'; // ← Add this import (adjust path if needed)
+import 'add_event_screen.dart';
 
 class EventListScreen extends StatefulWidget {
   const EventListScreen({super.key});
@@ -41,36 +43,45 @@ class _EventListScreenState extends State<EventListScreen> {
   Widget build(BuildContext context) {
     final currentUserUid = FirebaseAuth.instance.currentUser?.uid;
 
+    final backgroundCream = const Color(0xFFFAF7F2);
+    final textDark = const Color(0xFF1A1C35);
+    final textSecondary = const Color(0xFF5F6368);
+    final primaryRed = const Color(0xFFB22222);
+
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: backgroundCream,
       appBar: AppBar(
-        title: const Text(
+        title: Text(
           'Events',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
+          style: GoogleFonts.playfairDisplay(
+            fontWeight: FontWeight.w700,
+            color: textDark,
+            fontSize: 28,
+          ),
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
+        backgroundColor: backgroundCream,
+        foregroundColor: textDark,
         elevation: 0,
-        actions: const [
-          Padding(
-            padding: EdgeInsets.only(right: 16),
-            child: Icon(Icons.search, color: Colors.black),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.search, color: textDark),
+            onPressed: () {
+              // TODO: add search later if needed
+            },
           ),
         ],
       ),
       floatingActionButton: _canAddEvent
           ? FloatingActionButton.extended(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AddEventScreen()),
-                );
-              },
-              backgroundColor: const Color(0xFFE64646),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AddEventScreen()),
+              ),
+              backgroundColor: primaryRed,
               icon: const Icon(Icons.add, color: Colors.white),
-              label: const Text(
+              label: Text(
                 'Add Event',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600),
               ),
             )
           : null,
@@ -81,23 +92,42 @@ class _EventListScreenState extends State<EventListScreen> {
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: Color(0xFFE64646)));
+            return const Center(child: CircularProgressIndicator());
           }
 
           if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.red)));
+            print('Events stream error: ${snapshot.error}');
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text(
+                  'Error loading events\n${snapshot.error.toString()}',
+                  style: GoogleFonts.inter(color: Colors.red[700], fontSize: 16),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
           }
 
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.event_busy, size: 80, color: Colors.grey),
-                  SizedBox(height: 16),
+                  Icon(Icons.event_note_outlined, size: 80, color: textSecondary),
+                  const SizedBox(height: 16),
                   Text(
                     'No upcoming events yet',
-                    style: TextStyle(color: Colors.grey, fontSize: 18, fontWeight: FontWeight.w500),
+                    style: GoogleFonts.inter(
+                      color: textSecondary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Create one if you have permission!',
+                    style: GoogleFonts.inter(color: textSecondary.withOpacity(0.8)),
                   ),
                 ],
               ),
@@ -107,127 +137,154 @@ class _EventListScreenState extends State<EventListScreen> {
           final events = snapshot.data!.docs;
 
           return ListView.builder(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
             itemCount: events.length,
             itemBuilder: (context, index) {
               final eventDoc = events[index];
               final event = eventDoc.data() as Map<String, dynamic>;
               final eventId = eventDoc.id;
 
-              final startDate = event['startDate'] as Timestamp?;
-              final dateStr = startDate != null
-                  ? DateFormat('MMM dd, yyyy • hh:mm a').format(startDate.toDate())
-                  : 'Date not set';
+              final startTs = event['startDate'] as Timestamp?;
+              String datePart = 'Date TBD';
+              String timePart = 'Time TBD';
+
+              if (startTs != null) {
+                final dt = startTs.toDate();
+                datePart = DateFormat('MMM dd, yyyy').format(dt);
+                timePart = DateFormat('hh:mm a').format(dt);
+              }
+
+              final title = (event['title'] as String?)?.trim() ?? 'Untitled Event';
+              final location = (event['location'] as String?)?.trim() ?? 'Location TBD';
+              final description = (event['description'] as String?)?.trim() ?? '';
+
+              // Image priority: use uploaded heroImageUrl if exists, else fallback
+              String heroImageUrl = (event['heroImageUrl'] as String?)?.trim() ?? '';
+              if (heroImageUrl.isEmpty) {
+                // Use a consistent fallback (you can change seed or use random)
+                heroImageUrl = 'https://picsum.photos/seed/event$index/600/400';
+              }
+
+              // Debug print – check this in console to see what URL is being used
+              print('Event $eventId → displaying image: $heroImageUrl');
 
               return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.only(bottom: 20),
                 child: GestureDetector(
                   onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => EventScreen(
-                          event: {
-                            ...event,
-                            'id': eventId,
-                          },
-                        ),
+                        builder: (_) => EventScreen(event: {...event, 'id': eventId}),
                       ),
                     );
                   },
                   child: Card(
-                    elevation: 3,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    elevation: 2,
+                    shadowColor: Colors.black.withOpacity(0.08),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    color: Colors.white,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Top bar
-                        Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
+                        ClipRRect(
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                          child: Stack(
                             children: [
-                              CircleAvatar(
-                                radius: 18,
-                                backgroundColor: const Color(0xFFE64646).withOpacity(0.2),
-                                child: const Icon(Icons.school, color: Color(0xFFE64646), size: 20),
+                              CachedNetworkImage(
+                                imageUrl: heroImageUrl,
+                                height: 180,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                                placeholder: (context, url) => Container(
+                                  color: Colors.grey[200],
+                                  child: const Center(
+                                    child: SizedBox(
+                                      width: 40,
+                                      height: 40,
+                                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                                    ),
+                                  ),
+                                ),
+                                errorWidget: (context, url, error) {
+                                  print('Image load failed → $url | Error: $error');
+                                  return Container(
+                                    color: Colors.grey[300],
+                                    child: const Center(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.broken_image_rounded, size: 50, color: Colors.grey),
+                                          SizedBox(height: 8),
+                                          Text('No image', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                                fadeInDuration: const Duration(milliseconds: 400),
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'St. Cecilia’s Alumni',
-                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                              // Gradient overlay
+                              Positioned.fill(
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [Colors.black.withOpacity(0.1), Colors.black.withOpacity(0.6)],
                                     ),
-                                    Text(
-                                      dateStr,
-                                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                                    ),
-                                  ],
+                                  ),
                                 ),
                               ),
-                              const Icon(Icons.more_vert, color: Colors.black54),
+                              // Title overlay
+                              Positioned(
+                                bottom: 16,
+                                left: 20,
+                                right: 20,
+                                child: Text(
+                                  title,
+                                  style: GoogleFonts.playfairDisplay(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                    height: 1.15,
+                                    shadows: const [Shadow(blurRadius: 8, color: Colors.black54)],
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                             ],
                           ),
                         ),
 
-                        // Gradient post area
-                        Container(
-                          height: MediaQuery.of(context).size.width,
-                          width: double.infinity,
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                Color(0xFFFF5E7C),
-                                Color(0xFFFF8C61),
-                                Color(0xFFF9D423),
-                              ],
-                            ),
-                          ),
-                          child: Center(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 32),
-                              child: Text(
-                                event['title'] ?? 'Event Title',
-                                style: const TextStyle(
-                                  fontSize: 26,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                  shadows: [Shadow(blurRadius: 10, color: Colors.black45)],
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        // Content below gradient
                         Padding(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                event['description'] ?? 'No description available.',
-                                style: const TextStyle(fontSize: 14, height: 1.4, color: Colors.black87),
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
+                              Wrap(
+                                spacing: 12,
+                                runSpacing: 12,
                                 children: [
-                                  const Icon(Icons.location_on, size: 16, color: Colors.grey),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    event['location'] ?? 'Location not set',
-                                    style: TextStyle(fontSize: 14, color: Colors.grey[700]),
-                                  ),
+                                  _ElegantChip(icon: Icons.calendar_today_outlined, label: datePart, color: textDark),
+                                  _ElegantChip(icon: Icons.access_time_outlined, label: timePart, color: textDark),
+                                  _ElegantChip(icon: Icons.location_on_outlined, label: location, color: textDark),
                                 ],
                               ),
-                              const SizedBox(height: 16),
 
-                              // Action bar
+                              if (description.isNotEmpty) ...[
+                                const SizedBox(height: 20),
+                                Text(
+                                  description,
+                                  style: GoogleFonts.inter(fontSize: 15, height: 1.5, color: textSecondary),
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+
+                              const SizedBox(height: 20),
+
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
@@ -239,58 +296,72 @@ class _EventListScreenState extends State<EventListScreen> {
                                             .doc(eventId)
                                             .collection('likes')
                                             .snapshots(),
-                                        builder: (context, snapshot) {
-                                          if (!snapshot.hasData) {
-                                            return const Icon(Icons.favorite_border, color: Colors.black87, size: 26);
-                                          }
-                                          final likeCount = snapshot.data!.docs.length;
+                                        builder: (context, snap) {
+                                          final likeCount = snap.data?.docs.length ?? 0;
                                           final isLiked = currentUserUid != null &&
-                                              snapshot.data!.docs.any((doc) => doc.id == currentUserUid);
+                                              snap.data?.docs.any((d) => d.id == currentUserUid) == true;
 
-                                          return Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              GestureDetector(
-                                                onTap: () async {
-                                                  final uid = currentUserUid;
-                                                  if (uid == null) {
-                                                    ScaffoldMessenger.of(context).showSnackBar(
-                                                      const SnackBar(content: Text('Please sign in to like')),
-                                                    );
-                                                    return;
-                                                  }
-
-                                                  final likeRef = FirebaseFirestore.instance
-                                                      .collection('events')
-                                                      .doc(eventId)
-                                                      .collection('likes')
-                                                      .doc(uid);
-                                                  final doc = await likeRef.get();
-                                                  if (doc.exists) {
-                                                    await likeRef.delete();
-                                                    ScaffoldMessenger.of(context).showSnackBar(
-                                                      const SnackBar(content: Text('Removed like')),
-                                                    );
-                                                  } else {
-                                                    await likeRef.set({'likedAt': FieldValue.serverTimestamp()});
-                                                    ScaffoldMessenger.of(context).showSnackBar(
-                                                      const SnackBar(content: Text('Like added')),
-                                                    );
-                                                  }
-                                                },
-                                                child: Padding(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                                                  child: Icon(
-                                                    isLiked ? Icons.favorite : Icons.favorite_border,
-                                                    color: isLiked ? Colors.red : Colors.black87,
-                                                    size: 26,
-                                                  ),
+                                          return GestureDetector(
+                                            onTap: () async {
+                                              if (currentUserUid == null) {
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  const SnackBar(content: Text('Please sign in')),
+                                                );
+                                                return;
+                                              }
+                                              final ref = FirebaseFirestore.instance
+                                                  .collection('events')
+                                                  .doc(eventId)
+                                                  .collection('likes')
+                                                  .doc(currentUserUid);
+                                              final doc = await ref.get();
+                                              if (doc.exists) {
+                                                await ref.delete();
+                                              } else {
+                                                await ref.set({'likedAt': FieldValue.serverTimestamp()});
+                                              }
+                                            },
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  isLiked ? Icons.favorite : Icons.favorite_border,
+                                                  color: isLiked ? primaryRed : textSecondary,
+                                                  size: 22,
                                                 ),
-                                              ),
-                                              if (likeCount > 0) ...[
-                                                const SizedBox(width: 4),
-                                                Text('$likeCount', style: const TextStyle(color: Colors.black87, fontSize: 14)),
-                                              ]
+                                                if (likeCount > 0)
+                                                  Padding(
+                                                    padding: const EdgeInsets.only(left: 6),
+                                                    child: Text(
+                                                      '$likeCount',
+                                                      style: GoogleFonts.inter(
+                                                        color: textDark,
+                                                        fontWeight: FontWeight.w500,
+                                                      ),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      const SizedBox(width: 36),
+                                      StreamBuilder<QuerySnapshot>(
+                                        stream: FirebaseFirestore.instance
+                                            .collection('events')
+                                            .doc(eventId)
+                                            .collection('comments')
+                                            .snapshots(),
+                                        builder: (context, snap) {
+                                          final count = snap.data?.docs.length ?? 0;
+                                          return Row(
+                                            children: [
+                                              Icon(Icons.chat_bubble_outline_rounded,
+                                                  color: textSecondary, size: 22),
+                                              if (count > 0)
+                                                Padding(
+                                                  padding: const EdgeInsets.only(left: 6),
+                                                  child: Text('$count', style: GoogleFonts.inter(color: textDark)),
+                                                ),
                                             ],
                                           );
                                         },
@@ -326,24 +397,6 @@ class _EventListScreenState extends State<EventListScreen> {
                                   const Icon(Icons.bookmark_border, color: Colors.black87, size: 28),
                                 ],
                               ),
-
-                              const SizedBox(height: 8),
-
-                              StreamBuilder<QuerySnapshot>(
-                                stream: FirebaseFirestore.instance
-                                    .collection('events')
-                                    .doc(eventId)
-                                    .collection('likes')
-                                    .snapshots(),
-                                builder: (context, snapshot) {
-                                  final likeCount = snapshot.data?.docs.length ?? 0;
-                                  final label = likeCount == 1 ? 'like' : 'likes';
-                                  return Text(
-                                    '$likeCount $label',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                  );
-                                },
-                              ),
                             ],
                           ),
                         ),
@@ -355,6 +408,38 @@ class _EventListScreenState extends State<EventListScreen> {
             },
           );
         },
+      ),
+    );
+  }
+}
+
+class _ElegantChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _ElegantChip({required this.icon, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6)],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: GoogleFonts.inter(color: color, fontSize: 13, fontWeight: FontWeight.w500),
+          ),
+        ],
       ),
     );
   }
