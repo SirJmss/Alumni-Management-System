@@ -8,7 +8,12 @@ import 'package:alumni/features/gallery/presentation/screens/gallery_screen.dart
 import 'package:alumni/features/dashboard/presentation/screens/dashboard_screen.dart';
 import 'package:alumni/features/dashboard/presentation/screens/admin_dashboard_web.dart';
 import 'package:alumni/features/admin/presentation/screens/user_verification_moderation_screen.dart';
-
+import 'package:alumni/features/admin/presentation/screens/event_planning_screen.dart';
+import 'package:alumni/features/admin/presentation/screens/job_board_management_screen.dart';
+import 'package:alumni/features/admin/presentation/screens/chapter_management_screen.dart';
+import 'package:alumni/features/admin/presentation/screens/reunion_planning_screen.dart';
+import 'package:alumni/features/admin/presentation/screens/career_milestones_screen.dart';
+import 'package:alumni/features/admin/presentation/screens/announcement_management_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -42,6 +47,13 @@ class MyApp extends StatelessWidget {
         '/admin': (context) => const AdminDashboardWeb(),
         '/growth_metrics': (context) => const GrowthMetricsScreen(),
         '/user_verification_moderation': (context) => const UserVerificationScreen(),
+        '/event_planning': (context) => const EventPlanningScreen(),
+        '/job_board_management': (context) => const JobBoardManagementScreen(),
+        '/chapter_management': (context) => const ChapterManagementScreen(),
+        '/reunions_events': (context) => const ReunionAndEventsScreen(),
+        '/career_milestones': (context) => const CareerMilestonesScreen(),
+        '/announcement_management': (context) => const AnnouncementManagementScreen(),
+        '/admin_dashboard': (context) => const AdminDashboardWeb(),
       },
     );
   }
@@ -190,7 +202,7 @@ class LandingPage extends StatelessWidget {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF9B1D1D),
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
                             elevation: 0,
                           ),
                           child: const Text(
@@ -310,7 +322,7 @@ class LandingPage extends StatelessWidget {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF9B1D1D),
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
                             elevation: 0,
                           ),
                           child: const Text(
@@ -348,11 +360,11 @@ class LandingPage extends StatelessWidget {
                         style: TextStyle(fontSize: 13, color: Colors.grey.shade400, letterSpacing: 2),
                       ),
                       const SizedBox(height: 48),
-                      Wrap(
+                      const Wrap(
                         alignment: WrapAlignment.center,
                         spacing: 32,
                         runSpacing: 16,
-                        children: const [
+                        children: [
                           Text('SOCIAL', style: TextStyle(color: Colors.white70, fontSize: 13)),
                           Text('INSTAGRAM', style: TextStyle(color: Colors.white70, fontSize: 13)),
                           Text('CONCIERGE', style: TextStyle(color: Colors.white70, fontSize: 13)),

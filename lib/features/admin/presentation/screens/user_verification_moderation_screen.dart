@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-
 import 'package:alumni/core/constants/app_colors.dart';
 
 class UserVerificationScreen extends StatefulWidget {
@@ -14,603 +13,851 @@ class UserVerificationScreen extends StatefulWidget {
 }
 
 class _UserVerificationScreenState extends State<UserVerificationScreen> {
+  int _currentTab = 3; // Default: Verification Queue
+
   List<Map<String, dynamic>> allUsers = [];
-  List<Map<String, dynamic>> filteredUsers = [];
-  int pendingCount = 0;
+  List<Map<String, dynamic>> pendingUsers = [];
+  List<Map<String, dynamic>> recentLogins = [];
+  List<Map<String, dynamic>> verificationQueue = [];
 
   bool isLoading = true;
-  bool isActionInProgress = false;
   String? errorMessage;
 
-  String statusFilter = 'all';
-  String searchQuery = '';
-
-  final TextEditingController searchController = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
+  String _searchText = '';
 
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(() {
+      setState(() => _searchText = _searchController.text.trim().toLowerCase());
+    });
     _loadUsers();
-    searchController.addListener(_applyFilters);
   }
 
   @override
   void dispose() {
-    searchController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
   Future<void> _loadUsers() async {
-    if (!mounted) return;
-
     setState(() {
       isLoading = true;
       errorMessage = null;
     });
 
     try {
-      final firestore = FirebaseFirestore.instance;
-
-      final querySnap = await firestore
+      final usersSnap = await FirebaseFirestore.instance
           .collection('users')
           .orderBy('createdAt', descending: true)
           .get();
 
-      final users = querySnap.docs.map((doc) {
+      final List<Map<String, dynamic>> usersList = usersSnap.docs.map((doc) {
         final data = doc.data();
-        return <String, dynamic>{
+        final name = (data['name'] ?? data['fullName'] ?? 'Unknown').trim();
+        return {
           'id': doc.id,
-          'name': (data['name'] as String? ?? data['fullName'] as String? ?? 'Unknown').trim(),
-          'email': (data['email'] as String? ?? '—').trim(),
-          'degree': (data['degree'] as String? ?? '').trim(),
-          'batchYear': (data['batchYear'] as String? ?? data['batch'] as String? ?? '').trim(),
-          'status': (data['status'] as String? ?? 'unknown').toLowerCase(),
-          'submitted': _formatTimestamp(data['createdAt'] as Timestamp?),
-          'profilePhotoUrl': data['profilePhotoUrl'] as String?,
-          'idPhotoFrontUrl': data['idPhotoFrontUrl'] as String?,
-          'idPhotoBackUrl': data['idPhotoBackUrl'] as String?,
+          'name': name,
+          'email': data['email'] ?? '—',
+          'role': data['role'] ?? 'alumni',
+          'status': data['status'] ?? 'active',
+          'verificationStatus': data['verificationStatus'] ?? 'none',
+          'batch': data['batchYear'] ?? data['batch'] ?? '—',
+          'createdAt': (data['createdAt'] as Timestamp?)?.toDate(),
+          'lastLogin': (data['lastLogin'] as Timestamp?)?.toDate() ?? (data['lastActive'] as Timestamp?)?.toDate(),
+          'profilePictureUrl': data['profilePictureUrl'],
         };
       }).toList();
 
       if (!mounted) return;
 
       setState(() {
-        allUsers = users;
-        pendingCount = users.where((u) => u['status'] == 'pending').length;
-        _applyFilters();
+        allUsers = usersList;
+        pendingUsers = usersList.where((u) => u['status'] == 'pending').toList();
+        recentLogins = List.from(usersList)
+          ..sort((a, b) {
+            final aTime = a['lastLogin'] as DateTime?;
+            final bTime = b['lastLogin'] as DateTime?;
+            return (bTime ?? DateTime(2000)).compareTo(aTime ?? DateTime(2000));
+          });
+        verificationQueue = usersList.where((u) {
+          final status = u['status'] as String?;
+          final verStatus = u['verificationStatus'] as String?;
+          return status == 'pending' || verStatus == 'pending';
+        }).toList();
         isLoading = false;
       });
-    } catch (e, stack) {
-      debugPrint('Failed to load users: $e\n$stack');
-      if (mounted) {
-        setState(() {
-          errorMessage = 'Unable to load users.\nPlease try again.';
-          isLoading = false;
-        });
-      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        errorMessage = 'Failed to load users: $e';
+        isLoading = false;
+      });
     }
   }
 
-  void _applyFilters() {
-    var temp = List<Map<String, dynamic>>.from(allUsers);
+  List<Map<String, dynamic>> _getFilteredData() {
+    final list = switch (_currentTab) {
+      0 => allUsers,
+      1 => pendingUsers,
+      2 => recentLogins,
+      3 => verificationQueue,
+      _ => <Map<String, dynamic>>[],
+    };
 
-    if (statusFilter != 'all') {
-      temp = temp.where((u) => u['status'] == statusFilter).toList();
-    }
+    if (_searchText.isEmpty) return list;
 
-    final q = searchQuery.trim().toLowerCase();
-    if (q.isNotEmpty) {
-      temp = temp.where((u) {
-        final name = (u['name'] as String?)?.toLowerCase() ?? '';
-        final email = (u['email'] as String?)?.toLowerCase() ?? '';
-        return name.contains(q) || email.contains(q);
-      }).toList();
-    }
+    return list.where((user) {
+      final name = (user['name'] as String?)?.toLowerCase() ?? '';
+      final email = (user['email'] as String?)?.toLowerCase() ?? '';
+      final role = (user['role'] as String?)?.toLowerCase() ?? '';
+      final batch = (user['batch'] as String?)?.toLowerCase() ?? '';
+      final status = (user['status'] as String?)?.toLowerCase() ?? '';
+      final verStatus = (user['verificationStatus'] as String?)?.toLowerCase() ?? '';
 
-    if (mounted) {
-      setState(() => filteredUsers = temp);
-    }
+      return name.contains(_searchText) ||
+          email.contains(_searchText) ||
+          role.contains(_searchText) ||
+          batch.contains(_searchText) ||
+          status.contains(_searchText) ||
+          verStatus.contains(_searchText);
+    }).toList();
   }
 
-  String _formatTimestamp(Timestamp? ts) {
-    if (ts == null) return 'N/A';
-    final date = ts.toDate();
-    final now = DateTime.now();
-    if (date.isAfter(now.subtract(const Duration(days: 2)))) {
-      return DateFormat('h:mm a').format(date);
-    }
-    if (date.year == now.year) {
-      return DateFormat('MMM d • h:mm a').format(date);
-    }
-    return DateFormat('MMM d, yyyy • h:mm a').format(date);
-  }
+  Future<void> _approveVerification(String userId) async {
+    final user = allUsers.firstWhere(
+      (u) => u['id'] == userId,
+      orElse: () => {'name': 'User'},
+    );
+    final userName = user['name'] as String? ?? 'User';
 
-  Future<void> _performAction(
-    Future<void> Function() action, {
-    required String successMessage,
-    required String errorPrefix,
-    required Color successColor,
-  }) async {
-    if (isActionInProgress || !mounted) return;
-    setState(() => isActionInProgress = true);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Approve Verification'),
+        content: Text('Confirm verification for $userName?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.brandRed),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Approve'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Approving...'), duration: Duration(seconds: 15)),
+    );
 
     try {
-      await action();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(successMessage),
-            backgroundColor: successColor,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-        await _loadUsers();
-      }
+      await FirebaseFirestore.instance.collection('users').doc(userId).update({
+        'verificationStatus': 'verified',
+        'verifiedAt': FieldValue.serverTimestamp(),
+        'verifiedBy': FirebaseAuth.instance.currentUser?.uid,
+      });
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✓ $userName has been verified'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+
+      await _loadUsers();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$errorPrefix: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => isActionInProgress = false);
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to approve verification. Please try again.'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+
+      debugPrint('Approve error for $userId: $e');
     }
   }
 
-  Future<void> _verifyUser(String uid) => _performAction(
-        () => FirebaseFirestore.instance.collection('users').doc(uid).update({
-          'status': 'verified',
-          'verifiedAt': FieldValue.serverTimestamp(),
-          'verifiedBy': FirebaseAuth.instance.currentUser?.uid,
-          'updatedAt': FieldValue.serverTimestamp(),
-        }),
-        successMessage: 'User verified successfully',
-        errorPrefix: 'Verification failed',
-        successColor: AppColors.success,
-      );
+  Future<void> _rejectVerification(String userId) async {
+    final user = allUsers.firstWhere(
+      (u) => u['id'] == userId,
+      orElse: () => {'name': 'User'},
+    );
+    final userName = user['name'] as String? ?? 'User';
 
-  Future<void> _denyOrBanUser(String uid, String currentStatus) async {
     final reasonCtrl = TextEditingController();
 
-    final title = currentStatus == 'pending' ? 'Deny Verification' : 'Ban User';
-
-    final confirmed = await showDialog<bool?>(
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reject Verification'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Provide a reason (optional but recommended):'),
+            Text('Reject verification for $userName?'),
             const SizedBox(height: 16),
             TextField(
               controller: reasonCtrl,
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                hintText: 'e.g. Invalid documents, policy violation...',
-                hintStyle: GoogleFonts.inter(color: AppColors.mutedText),
-              ),
               maxLines: 3,
-              style: GoogleFonts.inter(),
+              decoration: InputDecoration(
+                hintText: 'Reason for rejection (optional)',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              ),
             ),
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: GoogleFonts.inter(color: AppColors.mutedText)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('Confirm', style: GoogleFonts.inter(color: AppColors.brandRed, fontWeight: FontWeight.w600)),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Reject'),
           ),
         ],
       ),
     );
 
+    final reason = reasonCtrl.text.trim();
+    reasonCtrl.dispose();
+
     if (confirmed != true || !mounted) return;
 
-    await _performAction(
-      () => FirebaseFirestore.instance.collection('users').doc(uid).update({
-        'status': 'denied',
-        'deniedReason': reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : null,
-        'deniedAt': FieldValue.serverTimestamp(),
-        'deniedBy': FirebaseAuth.instance.currentUser?.uid,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }),
-      successMessage: 'User denied/banned successfully',
-      errorPrefix: 'Action failed',
-      successColor: AppColors.warning,
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Rejecting...'), duration: Duration(seconds: 15)),
+    );
+
+    try {
+      final update = {
+        'verificationStatus': 'rejected',
+        'rejectedAt': FieldValue.serverTimestamp(),
+        'rejectedBy': FirebaseAuth.instance.currentUser?.uid,
+      };
+      if (reason.isNotEmpty) update['rejectionReason'] = reason;
+
+      await FirebaseFirestore.instance.collection('users').doc(userId).update(update);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✗ Verification rejected for $userName'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+
+      await _loadUsers();
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to reject verification. Please try again.'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+
+      debugPrint('Reject error for $userId: $e');
+    }
+  }
+
+  void _showUserDetails(Map<String, dynamic> user) {
+    final created = user['createdAt'] as DateTime?;
+    final lastLogin = user['lastLogin'] as DateTime?;
+    final status = user['status'] as String? ?? 'active';
+    final verStatus = user['verificationStatus'] as String? ?? 'none';
+    final isPending = status == 'pending' || verStatus == 'pending';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.75,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (_, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: AppColors.softWhite,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 20,
+                offset: const Offset(0, -5),
+              ),
+            ],
+          ),
+          child: SingleChildScrollView(
+            controller: scrollController,
+            padding: const EdgeInsets.fromLTRB(32, 32, 32, 48),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header with close button
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'User Profile',
+                      style: GoogleFonts.cormorantGaramond(
+                        fontSize: 36,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.darkText,
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close, color: AppColors.brandRed, size: 28),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+
+                // Profile avatar & name
+                Center(
+                  child: Column(
+                    children: [
+                      CircleAvatar(
+                        radius: 70,
+                        backgroundColor: AppColors.brandRed.withOpacity(0.08),
+                        backgroundImage: user['profilePictureUrl'] != null
+                            ? NetworkImage(user['profilePictureUrl'] as String)
+                            : null,
+                        child: user['profilePictureUrl'] == null
+                            ? Icon(Icons.person, size: 80, color: AppColors.brandRed.withOpacity(0.7))
+                            : null,
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        user['name'] as String,
+                        style: GoogleFonts.cormorantGaramond(
+                          fontSize: 38,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.darkText,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        user['email'] as String,
+                        style: GoogleFonts.inter(
+                          fontSize: 17,
+                          color: AppColors.mutedText,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 40),
+
+                // Details section
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.borderSubtle),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _detailRow('Role', user['role'] as String? ?? '—'),
+                      const Divider(height: 32, color: AppColors.borderSubtle),
+                      _detailRow('Batch', user['batch'] as String? ?? '—'),
+                      const Divider(height: 32, color: AppColors.borderSubtle),
+                      _detailRow('Account Status', status, chipColor: _statusColor(status)),
+                      const Divider(height: 32, color: AppColors.borderSubtle),
+                      _detailRow('Verification Status', verStatus, chipColor: _verColor(verStatus)),
+                      const Divider(height: 32, color: AppColors.borderSubtle),
+                      _detailRow('Created', created != null ? DateFormat('MMM dd, yyyy • HH:mm').format(created) : '—'),
+                      const Divider(height: 32, color: AppColors.borderSubtle),
+                      _detailRow('Last Login', lastLogin != null ? DateFormat('MMM dd, yyyy • HH:mm').format(lastLogin) : '—'),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 48),
+
+                // Quick actions (only for pending users)
+                if (isPending)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      FilledButton.icon(
+                        icon: const Icon(Icons.check_circle, size: 20),
+                        label: const Text('Approve'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _approveVerification(user['id'] as String);
+                        },
+                      ),
+                      FilledButton.icon(
+                        icon: const Icon(Icons.cancel, size: 20),
+                        label: const Text('Reject'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _rejectVerification(user['id'] as String);
+                        },
+                      ),
+                    ],
+                  ),
+
+                const SizedBox(height: 40),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
-  Future<void> _reinstateUser(String uid) => _performAction(
-        () => FirebaseFirestore.instance.collection('users').doc(uid).update({
-          'status': 'verified',
-          'reinstatedAt': FieldValue.serverTimestamp(),
-          'reinstatedBy': FirebaseAuth.instance.currentUser?.uid,
-          'updatedAt': FieldValue.serverTimestamp(),
-          'deniedReason': FieldValue.delete(),
-        }),
-        successMessage: 'User reinstated successfully',
-        errorPrefix: 'Reinstate failed',
-        successColor: AppColors.success,
-      );
-
-  Future<void> _deleteUser(String uid) async {
-    final confirmed = await showDialog<bool?>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete User'),
-        content: const Text('Are you sure you want to delete this user? This action cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: GoogleFonts.inter(color: AppColors.mutedText)),
+  Widget _detailRow(String label, String value, {Color? chipColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 140,
+            child: Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppColors.mutedText,
+              ),
+            ),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('Delete', style: GoogleFonts.inter(color: AppColors.error, fontWeight: FontWeight.w600)),
+          Expanded(
+            child: chipColor != null
+                ? Chip(
+                    label: Text(
+                      value.toUpperCase(),
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    backgroundColor: chipColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  )
+                : Text(
+                    value,
+                    style: GoogleFonts.inter(
+                      fontSize: 16,
+                      color: AppColors.darkText,
+                    ),
+                  ),
           ),
         ],
       ),
     );
+  }
 
-    if (confirmed != true || !mounted) return;
+  Color _statusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'active':
+        return Colors.green.shade700;
+      case 'pending':
+        return Colors.orange.shade700;
+      case 'rejected':
+        return Colors.red.shade700;
+      default:
+        return AppColors.mutedText;
+    }
+  }
 
-    await _performAction(
-      () => FirebaseFirestore.instance.collection('users').doc(uid).delete(),
-      successMessage: 'User deleted successfully',
-      errorPrefix: 'Delete failed',
-      successColor: AppColors.error,
-    );
+  Color _verColor(String verStatus) {
+    switch (verStatus.toLowerCase()) {
+      case 'verified':
+        return Colors.green.shade700;
+      case 'pending':
+        return Colors.orange.shade700;
+      case 'rejected':
+        return Colors.red.shade700;
+      default:
+        return AppColors.mutedText;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.softWhite,
-      appBar: AppBar(
-        backgroundColor: AppColors.cardWhite,
-        elevation: 0,
-        title: Text(
-          'User Verification & Moderation',
-          style: GoogleFonts.cormorantGaramond(
-            fontSize: 32,
-            fontWeight: FontWeight.w300,
-            color: AppColors.darkText,
-          ),
-        ),
-        actions: [
-          if (isActionInProgress)
-            const Padding(
-              padding: EdgeInsets.only(right: 24),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.brandRed),
-              ),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.refresh_rounded, color: AppColors.brandRed),
-              onPressed: isLoading ? null : _loadUsers,
-              tooltip: 'Refresh',
+      body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Sidebar unchanged
+          Container(
+            width: 300,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(right: BorderSide(color: AppColors.borderSubtle, width: 0.5)),
             ),
-          const SizedBox(width: 16),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: isLoading || isActionInProgress ? () async {} : _loadUsers,
-        color: AppColors.brandRed,
-        child: isLoading
-            ? const Center(child: CircularProgressIndicator(color: AppColors.brandRed))
-            : errorMessage != null
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 60),
-                      child: SelectableText(
-                        errorMessage!,
-                        style: GoogleFonts.inter(
-                          color: AppColors.error,
-                          fontSize: 16,
-                          height: 1.5,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  )
-                : Column(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(64, 24, 64, 16),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: searchController,
-                                decoration: InputDecoration(
-                                  labelText: 'Search by name or email',
-                                  border: const OutlineInputBorder(),
-                                  prefixIcon: const Icon(Icons.search),
-                                  filled: true,
-                                  fillColor: AppColors.cardWhite,
-                                ),
-                                onChanged: (value) {
-                                  searchQuery = value;
-                                  _applyFilters();
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 24),
-                            DropdownButton<String>(
-                              value: statusFilter,
-                              items: const [
-                                DropdownMenuItem(value: 'all', child: Text('All')),
-                                DropdownMenuItem(value: 'pending', child: Text('Pending')),
-                                DropdownMenuItem(value: 'verified', child: Text('Verified')),
-                                DropdownMenuItem(value: 'denied', child: Text('Denied')),
-                              ],
-                              onChanged: (value) {
-                                if (value != null) {
-                                  setState(() {
-                                    statusFilter = value;
-                                    _applyFilters();
-                                  });
-                                }
-                              },
-                            ),
-                          ],
+                      Text(
+                        'ALUMNI',
+                        style: GoogleFonts.cormorantGaramond(
+                          fontSize: 22,
+                          letterSpacing: 6,
+                          color: AppColors.brandRed,
+                          fontWeight: FontWeight.w300,
                         ),
                       ),
-                      Expanded(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.fromLTRB(64, 0, 64, 120),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'User Management',
-                                style: GoogleFonts.cormorantGaramond(
-                                  fontSize: 48,
-                                  fontStyle: FontStyle.italic,
-                                  fontWeight: FontWeight.w300,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Pending verifications: $pendingCount',
-                                style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  letterSpacing: 0.8,
-                                  color: AppColors.mutedText,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 48),
-
-                              if (filteredUsers.isEmpty)
-                                Center(
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 120),
-                                    child: Text(
-                                      'No users match the current filters.',
-                                      style: GoogleFonts.inter(
-                                        color: AppColors.mutedText,
-                                        fontSize: 17,
-                                      ),
-                                    ),
-                                  ),
-                                )
-                              else
-                                Container(
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: AppColors.borderSubtle),
-                                  ),
-                                  child: DataTable(
-                                    headingRowColor: WidgetStateProperty.all(AppColors.softWhite),
-                                    dataRowMinHeight: 72,
-                                    dataRowMaxHeight: 96,
-                                    columnSpacing: 24,
-                                    columns: const [
-                                      DataColumn(label: _HeaderLabel('ALUMNUS')),
-                                      DataColumn(label: _HeaderLabel('EMAIL')),
-                                      DataColumn(label: _HeaderLabel('BATCH / DEGREE')),
-                                      DataColumn(label: _HeaderLabel('STATUS')),
-                                      DataColumn(label: _HeaderLabel('SUBMITTED')),
-                                      DataColumn(label: _HeaderLabel('IMAGES')),
-                                      DataColumn(label: _HeaderLabel('ACTIONS')),
-                                    ],
-                                    rows: filteredUsers.map(_buildRow).toList(),
-                                  ),
-                                ),
-
-                              const SizedBox(height: 120),
-                            ],
-                          ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'ARCHIVE PORTAL',
+                        style: GoogleFonts.inter(
+                          fontSize: 9,
+                          letterSpacing: 2,
+                          color: AppColors.mutedText,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ],
                   ),
-      ),
-    );
-  }
-
-  DataRow _buildRow(Map<String, dynamic> user) {
-    final degree = user['degree'] as String? ?? '';
-    final batchYear = user['batchYear'] as String? ?? '';
-    final degreeBatch = (degree.isNotEmpty && batchYear.isNotEmpty)
-        ? '$degree • $batchYear'
-        : (degree.isNotEmpty ? degree : (batchYear.isNotEmpty ? batchYear : '—'));
-
-    final status = (user['status'] as String?)?.toLowerCase() ?? 'unknown';
-
-    return DataRow(
-      cells: [
-        DataCell(
-          Text(
-            user['name'] as String? ?? 'Unknown',
-            style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w600),
-          ),
-        ),
-        DataCell(
-          Text(
-            user['email'] as String? ?? '—',
-            style: GoogleFonts.inter(fontSize: 12.5, color: AppColors.mutedText),
-          ),
-        ),
-        DataCell(
-          Text(
-            degreeBatch,
-            style: GoogleFonts.inter(fontSize: 12.5),
-          ),
-        ),
-        DataCell(_buildStatusChip(status)),
-        DataCell(
-          Text(
-            user['submitted'] as String? ?? 'N/A',
-            style: GoogleFonts.inter(fontSize: 11.5, color: AppColors.mutedText),
-          ),
-        ),
-        DataCell(
-          TextButton(
-            onPressed: () => _showImages(user),
-            child: Text(
-              'View',
-              style: GoogleFonts.inter(color: AppColors.brandRed, fontWeight: FontWeight.w600),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildSidebarSection('NETWORK', [
+                          _SidebarItem(label: 'Overview', route: '/overview'),
+                          _SidebarItem(label: 'Chapter Management', route: '/chapter_management'),
+                        ]),
+                        const SizedBox(height: 32),
+                        _buildSidebarSection('ENGAGEMENT', [
+                          _SidebarItem(label: 'Reunions & Events', route: '/reunions_events'),
+                          _SidebarItem(label: 'Career Milestones', route: '/career_milestones'),
+                        ]),
+                        const SizedBox(height: 32),
+                        _buildSidebarSection('ADMIN FEATURES', [
+                          _SidebarItem(label: 'User Verification & Moderation', isActive: true, route: '/user_verification_moderation'),
+                          _SidebarItem(label: 'Event Planning', route: '/event_planning'),
+                          _SidebarItem(label: 'Job Board Management', route: '/job_board_management'),
+                          _SidebarItem(label: 'Growth Metrics', route: '/growth_metrics'),
+                          _SidebarItem(label: 'Announcement Management', route: '/announcement_management'),
+                        ]),
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(32),
+                  decoration: BoxDecoration(
+                    border: Border(top: BorderSide(color: AppColors.borderSubtle.withOpacity(0.3))),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 16,
+                            backgroundColor: AppColors.brandRed,
+                            child: Text('A', style: GoogleFonts.cormorantGaramond(color: Colors.white, fontSize: 14)),
+                          ),
+                          const SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Registrar Admin', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold)),
+                              Text('NETWORK OVERSEER', style: GoogleFonts.inter(fontSize: 9, color: AppColors.mutedText)),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      TextButton(
+                        onPressed: () async {
+                          await FirebaseAuth.instance.signOut();
+                          if (mounted) Navigator.pushReplacementNamed(context, '/');
+                        },
+                        child: Text(
+                          'DISCONNECT',
+                          style: GoogleFonts.inter(fontSize: 10, letterSpacing: 2, color: AppColors.mutedText, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
-        DataCell(
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (status == 'pending') ...[
-                _ActionButton('Verify', Icons.check_circle_outline, AppColors.success, () => _verifyUser(user['id'] as String)),
-                _ActionButton('Deny', Icons.block, AppColors.warning, () => _denyOrBanUser(user['id'] as String, status)),
-              ] else if (status == 'verified') ...[
-                _ActionButton('Edit', Icons.edit, AppColors.info, () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Edit feature coming soon')),
-                  );
-                }),
-                _ActionButton('Ban', Icons.block, AppColors.warning, () => _denyOrBanUser(user['id'] as String, status)),
-              ] else if (status == 'denied') ...[
-                _ActionButton('Reinstate', Icons.restore, AppColors.success, () => _reinstateUser(user['id'] as String)),
-              ],
-              _ActionButton('Delete', Icons.delete_outline, AppColors.error, () => _deleteUser(user['id'] as String)),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
 
-  Widget _buildStatusChip(String status) {
-    Color color;
-    String label;
+          // Main content (unchanged)
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Trust & Safety Dashboard',
+                            style: GoogleFonts.cormorantGaramond(
+                              fontSize: 40,
+                              fontWeight: FontWeight.w400,
+                              color: AppColors.darkText,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Verify identities and moderate community interactions.',
+                            style: GoogleFonts.inter(
+                              fontSize: 16,
+                              color: AppColors.mutedText,
+                            ),
+                          ),
+                        ],
+                      ),
+                      FilledButton.icon(
+                        icon: const Icon(Icons.refresh, size: 18),
+                        label: const Text('Refresh All'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.brandRed,
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: _loadUsers,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
 
-    switch (status) {
-      case 'verified':
-        color = AppColors.success;
-        label = 'VERIFIED';
-        break;
-      case 'pending':
-        color = AppColors.warning;
-        label = 'PENDING';
-        break;
-      case 'denied':
-        color = AppColors.error;
-        label = 'DENIED';
-        break;
-      default:
-        color = AppColors.mutedText;
-        label = 'UNKNOWN';
-    }
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _TabButton('All Users', 0),
+                        const SizedBox(width: 12),
+                        _TabButton('Pending Users', 1),
+                        const SizedBox(width: 12),
+                        _TabButton('Recent Logins', 2),
+                        const SizedBox(width: 12),
+                        _TabButton('Verification Queue', 3),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
 
-    return Chip(
-      label: Text(label, style: GoogleFonts.inter(fontSize: 10, color: Colors.white)),
-      backgroundColor: color,
-      padding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
-    );
-  }
+                  SizedBox(
+                    width: 400,
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Search by name, email, role, batch...',
+                        prefixIcon: const Icon(Icons.search, color: AppColors.brandRed),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 32),
 
-  void _showImages(Map<String, dynamic> user) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('User Images'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (user['profilePhotoUrl'] != null) ...[
-                const Text('Profile Photo:'),
-                Image.network(user['profilePhotoUrl'] as String, height: 200, errorBuilder: (_, __, ___) => const Text('Error loading image')),
-                const SizedBox(height: 16),
-              ],
-              if (user['idPhotoFrontUrl'] != null) ...[
-                const Text('ID Front:'),
-                Image.network(user['idPhotoFrontUrl'] as String, height: 200, errorBuilder: (_, __, ___) => const Text('Error loading image')),
-                const SizedBox(height: 16),
-              ],
-              if (user['idPhotoBackUrl'] != null) ...[
-                const Text('ID Back:'),
-                Image.network(user['idPhotoBackUrl'] as String, height: 200, errorBuilder: (_, __, ___) => const Text('Error loading image')),
-              ],
-              if (user['profilePhotoUrl'] == null && user['idPhotoFrontUrl'] == null && user['idPhotoBackUrl'] == null)
-                const Text('No images available', style: TextStyle(color: Colors.grey)),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
+                  isLoading
+                      ? const Center(child: CircularProgressIndicator(color: AppColors.brandRed))
+                      : errorMessage != null
+                          ? Center(child: Text(errorMessage!, style: const TextStyle(color: Colors.red)))
+                          : _buildDataTable(),
+                ],
+              ),
+            ),
           ),
         ],
       ),
     );
   }
-}
 
-class _HeaderLabel extends StatelessWidget {
-  final String text;
+  Widget _buildDataTable() {
+    final data = _getFilteredData();
 
-  const _HeaderLabel(this.text);
+    if (data.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 100),
+          child: Text(
+            _currentTab == 3 ? 'No pending verification requests' : 'No users found in this category',
+            style: GoogleFonts.inter(fontSize: 17, color: AppColors.mutedText),
+          ),
+        ),
+      );
+    }
 
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: GoogleFonts.inter(
-        fontSize: 10.5,
-        letterSpacing: 1.2,
-        fontWeight: FontWeight.bold,
-        color: AppColors.mutedText,
+    final bool isVerificationTab = _currentTab == 3;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        columnSpacing: 32,
+        headingRowColor: WidgetStatePropertyAll(Colors.white),
+        headingTextStyle: GoogleFonts.inter(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: AppColors.darkText,
+        ),
+        dataTextStyle: GoogleFonts.inter(fontSize: 14, color: AppColors.darkText),
+        columns: [
+          const DataColumn(label: Text('Name')),
+          const DataColumn(label: Text('Email')),
+          const DataColumn(label: Text('Role')),
+          const DataColumn(label: Text('Status')),
+          const DataColumn(label: Text('Batch')),
+          const DataColumn(label: Text('Created')),
+          const DataColumn(label: Text('Last Login')),
+          DataColumn(label: Text(isVerificationTab ? 'Actions' : 'View')),
+        ],
+        rows: data.map((user) {
+          final created = user['createdAt'] as DateTime?;
+          final lastLogin = user['lastLogin'] as DateTime?;
+          final isPendingVerification = user['verificationStatus'] == 'pending';
+
+          return DataRow(cells: [
+            DataCell(Text(user['name'] as String)),
+            DataCell(Text(user['email'] as String)),
+            DataCell(Text(user['role'] as String)),
+            DataCell(Text(user['status'] as String)),
+            DataCell(Text(user['batch'] as String)),
+            DataCell(Text(created != null ? DateFormat('MMM dd, yyyy').format(created) : '—')),
+            DataCell(Text(lastLogin != null ? DateFormat('MMM dd, yyyy • HH:mm').format(lastLogin) : '—')),
+            DataCell(
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.visibility, color: AppColors.brandRed, size: 20),
+                    tooltip: 'View Details',
+                    onPressed: () => _showUserDetails(user),
+                  ),
+                  if (isVerificationTab && isPendingVerification) ...[
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                      tooltip: 'Approve Verification',
+                      onPressed: () => _approveVerification(user['id'] as String),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.cancel, color: Colors.red, size: 20),
+                      tooltip: 'Reject Verification',
+                      onPressed: () => _rejectVerification(user['id'] as String),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ]);
+        }).toList(),
       ),
     );
   }
-}
 
-Widget _ActionButton(String label, IconData icon, Color color, VoidCallback onPressed) {
-  return TextButton.icon(
-    onPressed: onPressed,
-    icon: Icon(icon, size: 18, color: color),
-    label: Text(
-      label,
-      style: GoogleFonts.inter(
-        fontSize: 11.5,
-        color: color,
-        fontWeight: FontWeight.w600,
+  Widget _TabButton(String label, int index) {
+    final active = _currentTab == index;
+    return GestureDetector(
+      onTap: () => setState(() => _currentTab = index),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+        margin: const EdgeInsets.only(right: 12),
+        decoration: BoxDecoration(
+          color: active ? AppColors.brandRed : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: active ? AppColors.brandRed : AppColors.borderSubtle),
+          boxShadow: active ? [BoxShadow(color: AppColors.brandRed.withOpacity(0.2), blurRadius: 12)] : null,
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.inter(
+            color: active ? Colors.white : AppColors.darkText,
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
+          ),
+        ),
       ),
-    ),
-    style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6)),
-  );
+    );
+  }
+
+  Widget _buildSidebarSection(String title, List<Widget> items) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.inter(
+            fontSize: 10,
+            letterSpacing: 2,
+            fontWeight: FontWeight.bold,
+            color: AppColors.mutedText.withOpacity(0.7),
+          ),
+        ),
+        const SizedBox(height: 16),
+        ...items,
+      ],
+    );
+  }
+
+  Widget _SidebarItem({required String label, bool isActive = false, String? route}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: GestureDetector(
+        onTap: route != null ? () => Navigator.pushNamed(context, route) : null,
+        child: MouseRegion(
+          cursor: route != null ? SystemMouseCursors.click : SystemMouseCursors.basic,
+          child: Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 13.5,
+              color: isActive ? AppColors.brandRed : AppColors.darkText,
+              fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

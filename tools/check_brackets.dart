@@ -1,7 +1,7 @@
 import 'dart:io';
 
 void main() {
-  final path = r'd:\Alumni-Management-System\lib\features\event\presentation\screens\event_list_screen.dart';
+  const path = r'd:\Alumni-Management-System\lib\features\event\presentation\screens\event_list_screen.dart';
   final s = File(path).readAsStringSync();
   final pairs = {'(': ')', '[': ']', '{': '}'};
   final inv = {')': '(', ']': '[', '}': '{'};

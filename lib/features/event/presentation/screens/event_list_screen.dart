@@ -366,9 +366,35 @@ class _EventListScreenState extends State<EventListScreen> {
                                           );
                                         },
                                       ),
+
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                                        child: StreamBuilder<QuerySnapshot>(
+                                          stream: FirebaseFirestore.instance
+                                              .collection('events')
+                                              .doc(eventId)
+                                              .collection('comments')
+                                              .snapshots(),
+                                          builder: (context, snapshot) {
+                                            final count = snapshot.data?.docs.length ?? 0;
+                                            return Row(
+                                              children: [
+                                                const Icon(Icons.chat_bubble_outline, color: Colors.black87, size: 26),
+                                                const SizedBox(width: 4),
+                                                Text('$count', style: const TextStyle(color: Colors.black87, fontSize: 14)),
+                                              ],
+                                            );
+                                          },
+                                        ),
+                                      ),
+
+                                      const Padding(
+                                        padding: EdgeInsets.symmetric(horizontal: 12),
+                                        child: Icon(Icons.send_outlined, color: Colors.black87, size: 26),
+                                      ),
                                     ],
                                   ),
-                                  Icon(Icons.bookmark_border_rounded, color: textSecondary, size: 24),
+                                  const Icon(Icons.bookmark_border, color: Colors.black87, size: 28),
                                 ],
                               ),
                             ],

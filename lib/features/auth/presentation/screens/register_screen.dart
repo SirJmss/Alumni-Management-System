@@ -311,8 +311,8 @@ await firestore.collection('users').doc(user.uid).set({
                               ),
                             ),
                             const SizedBox(width: 12),
-                            Expanded(
-                              child: const Text(
+                            const Expanded(
+                              child: Text(
                                 'I acknowledge the Non-Disclosure Agreement and understand that membership is subject to committee review.',
                                 style: TextStyle(fontSize: 14, color: Color(0xFF444444), height: 1.4),
                               ),
