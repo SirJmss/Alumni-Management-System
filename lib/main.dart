@@ -14,6 +14,11 @@ import 'package:alumni/features/admin/presentation/screens/chapter_management_sc
 import 'package:alumni/features/admin/presentation/screens/reunion_planning_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/career_milestones_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/announcement_management_screen.dart';
+import 'package:alumni/features/event/presentation/screens/discussions_screen.dart';
+import 'package:alumni/features/event/presentation/screens/messages_screen.dart';
+import 'package:alumni/features/event/presentation/screens/friends_screen.dart';
+import 'package:alumni/features/auth/presentation/screens/settings_screen.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -54,6 +59,11 @@ class MyApp extends StatelessWidget {
         '/career_milestones': (context) => const CareerMilestonesScreen(),
         '/announcement_management': (context) => const AnnouncementManagementScreen(),
         '/admin_dashboard': (context) => const AdminDashboardWeb(),
+        '/discussions': (context) => const DiscussionsScreen(),
+        '/messages': (context) => const MessagesScreen(),
+        '/friends': (context) => const FriendsScreen(),
+        'settings': (context) => const SettingsScreen(),
+
       },
     );
   }

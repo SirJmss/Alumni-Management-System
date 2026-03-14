@@ -1,3 +1,4 @@
+import 'package:alumni/features/admin/presentation/screens/job_board_management_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -8,7 +9,10 @@ import 'package:alumni/features/profile/presentation/screens/profile_screen.dart
 import 'package:alumni/features/event/presentation/screens/event_list_screen.dart';
 import 'package:alumni/features/gallery/presentation/screens/gallery_screen.dart';
 import 'package:alumni/features/announcements/presentation/screens/announcements_screen.dart';
-
+import 'package:alumni/features/event/presentation/screens/discussions_screen.dart';
+import 'package:alumni/features/event/presentation/screens/messages_screen.dart';
+import 'package:alumni/features/event/presentation/screens/friends_screen.dart';
+import 'package:alumni/features/auth/presentation/screens/settings_screen.dart';
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -553,10 +557,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           _drawerTile(Icons.dashboard_outlined, 'DASHBOARD', active: true),
           _drawerTile(Icons.person_outline, 'MY PROFILE', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AlumniProfileScreen()))),
+          _drawerTile(Icons.book_outlined, 'DISCUSSIONS', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscussionsScreen()))),
           _drawerTile(Icons.event_outlined, 'EVENTS', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EventListScreen()))),
           _drawerTile(Icons.campaign_outlined, 'ANNOUNCEMENTS', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AnnouncementsScreen()))),
           _drawerTile(Icons.photo_library_outlined, 'GALLERY', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GalleryScreen()))),
+          _drawerTile(Icons.book_outlined, 'MESSAGES', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MessagesScreen()))),
+          _drawerTile(Icons.book_outlined, 'FRIENDS', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FriendsScreen()))),
+          _drawerTile(Icons.book_outlined, 'JOBS AND OPPORTUNITIES', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const JobBoardManagementScreen()))),
+          _drawerTile(Icons.book_outlined, 'SETTINGS', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()))),
+
           const Spacer(),
+
           const Divider(color: Color(0xFFE5E7EB), height: 1),
           _drawerTile(Icons.logout, 'LOGOUT', isDestructive: true, onTap: _logout),
           const SizedBox(height: 40),
