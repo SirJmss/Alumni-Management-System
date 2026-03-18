@@ -1,3 +1,4 @@
+import 'package:alumni/features/profile/presentation/screens/edit_profile_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'firebase_options.dart';
@@ -18,6 +19,7 @@ import 'package:alumni/features/event/presentation/screens/discussions_screen.da
 import 'package:alumni/features/event/presentation/screens/messages_screen.dart';
 import 'package:alumni/features/event/presentation/screens/friends_screen.dart';
 import 'package:alumni/features/auth/presentation/screens/settings_screen.dart';
+import 'package:alumni/features/profile/presentation/screens/profile_screen.dart';       // AlumniProfileScreen
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -62,7 +64,9 @@ class MyApp extends StatelessWidget {
         '/discussions': (context) => const DiscussionsScreen(),
         '/messages': (context) => const MessagesScreen(),
         '/friends': (context) => const FriendsScreen(),
-        'settings': (context) => const SettingsScreen(),
+        '/settings': (context) => const SettingsScreen(),
+        '/profile': (context) => const AlumniProfileScreen(),
+        '/edit_profile': (context) => const EditProfileScreen(),
 
       },
     );

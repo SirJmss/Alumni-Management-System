@@ -1,18 +1,9 @@
-import 'package:alumni/features/admin/presentation/screens/job_board_management_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-// Your existing screen imports
-import 'package:alumni/features/profile/presentation/screens/profile_screen.dart';
-import 'package:alumni/features/event/presentation/screens/event_list_screen.dart';
-import 'package:alumni/features/gallery/presentation/screens/gallery_screen.dart';
-import 'package:alumni/features/announcements/presentation/screens/announcements_screen.dart';
-import 'package:alumni/features/event/presentation/screens/discussions_screen.dart';
-import 'package:alumni/features/event/presentation/screens/messages_screen.dart';
-import 'package:alumni/features/event/presentation/screens/friends_screen.dart';
-import 'package:alumni/features/auth/presentation/screens/settings_screen.dart';
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -21,7 +12,6 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  // Logic remains identical to your original code
   String userName = 'Guest';
   String userRole = 'Alumni';
   String? userPhotoUrl;
@@ -45,7 +35,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _loadAllData();
   }
 
-  // --- START OF YOUR ORIGINAL LOGIC (DO NOT CHANGE) ---
   Future<void> _loadAllData() async {
     setState(() {
       isLoadingProfile = true;
@@ -95,7 +84,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         firestore.collection('users').count().get(),
         firestore.collection('events').where('startDate', isGreaterThan: now).count().get(),
         firestore.collection('courses').count().get(),
-        firestore.collection('messages')
+        firestore
+            .collection('messages')
             .where('toUid', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
             .where('read', isEqualTo: false)
             .count()
@@ -161,6 +151,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _loadNearbyAlumni() async {
+    // This is mock data – replace with real geo query later if needed
     setState(() {
       nearbyAlumni = [
         {'name': 'Sarah Jenkins', 'role': 'Principal Architect', 'year': '’14'},
@@ -171,9 +162,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _logout() async {
     await FirebaseAuth.instance.signOut();
-    if (mounted) Navigator.pushReplacementNamed(context, '/login');
+    if (mounted) {
+      Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+    }
   }
-  // --- END OF YOUR ORIGINAL LOGIC ---
+
+  bool get isAdmin =>
+      userRole.toLowerCase() == 'admin' ||
+      userRole.toLowerCase() == 'staff' ||
+      userRole.toLowerCase() == 'moderator' ||
+      userRole.toLowerCase() == 'registrar';
 
   @override
   Widget build(BuildContext context) {
@@ -232,7 +230,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
               ],
             ),
-            onPressed: () {},
+            onPressed: () {
+              // TODO: Notifications screen if you create one later
+            },
           ),
           const SizedBox(width: 12),
         ],
@@ -249,7 +249,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // --- NEW WELCOME DESIGN ---
+                    // Welcome message
                     Text(
                       'Welcome home,\n${userName.split(' ').first}.',
                       style: GoogleFonts.cormorantGaramond(
@@ -261,6 +261,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
+
+                    // Badges
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -272,16 +274,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(height: 40),
 
-                    // --- QUICK ACTIONS ---
+                    // Quick actions
                     SizedBox(
                       height: 90,
                       child: ListView(
                         scrollDirection: Axis.horizontal,
                         children: [
-                          _buildActionCircle('Network', Icons.people_outline, () {}),
-                          _buildActionCircle('Messages', Icons.mail_outline, () {}, badge: unreadMessages),
+                          _buildActionCircle('Network', Icons.people_outline, () {
+                            Navigator.pushNamed(context, '/friends');
+                          }),
+                          _buildActionCircle('Messages', Icons.mail_outline, () {
+                            Navigator.pushNamed(context, '/messages');
+                          }, badge: unreadMessages),
                           _buildActionCircle('Update', Icons.edit_outlined, () {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => const AlumniProfileScreen()));
+                            Navigator.pushNamed(context, '/profile');
                           }),
                           _buildActionCircle('Library', Icons.bookmark_border, () {}),
                         ],
@@ -289,7 +295,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(height: 40),
 
-                    // --- STATS ROW ---
+                    // Stats row
                     Container(
                       padding: const EdgeInsets.symmetric(vertical: 24),
                       decoration: const BoxDecoration(
@@ -311,17 +317,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(height: 48),
 
-                    // --- OPPORTUNITIES ---
+                    // Curated Opportunities
                     _sectionHeader('Curated Opportunities', 'VIEW BOARD'),
                     const SizedBox(height: 20),
                     if (recentOpportunities.isEmpty)
                       _buildEmptyState('No opportunities currently listed')
                     else
                       ...recentOpportunities.map(_opportunityCard),
-                    
+
                     const SizedBox(height: 48),
 
-                    // --- CALENDAR ---
+                    // Calendar
                     _sectionHeader('Your Calendar', ''),
                     const SizedBox(height: 20),
                     if (upcomingCalendar.isEmpty)
@@ -331,7 +337,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                     const SizedBox(height: 48),
 
-                    // --- NEARBY ---
+                    // Nearby Alumni
                     _sectionHeader('Alumni Near You', 'DISCOVER'),
                     const SizedBox(height: 24),
                     SizedBox(
@@ -350,7 +356,126 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // --- REFINED UI COMPONENT HELPERS ---
+  // ────────────────────────────────────────────────
+  // Drawer with proper icons and named routes
+  // ────────────────────────────────────────────────
+
+  Widget _buildDrawer() {
+    return Drawer(
+      backgroundColor: Colors.white,
+      elevation: 0,
+      child: Column(
+        children: [
+          DrawerHeader(
+            padding: const EdgeInsets.all(32),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB), width: 0.5)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Text(
+                  'PORTAL',
+                  style: GoogleFonts.cormorantGaramond(
+                    fontSize: 28,
+                    fontStyle: FontStyle.italic,
+                    color: const Color(0xFF991B1B),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  userName.toUpperCase(),
+                  style: GoogleFonts.inter(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2,
+                    color: const Color(0xFF6B7280),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ─── Common menu items ───
+          _drawerTile(Icons.dashboard_outlined, 'Dashboard', active: true),
+          _drawerTile(Icons.person_outline, 'My Profile', route: '/profile'),
+          _drawerTile(Icons.forum_outlined, 'Discussions', route: '/discussions'),
+          _drawerTile(Icons.event_available_outlined, 'Events', route: '/events'),
+          _drawerTile(Icons.campaign_outlined, 'Announcements', route: '/announcements'),
+          _drawerTile(Icons.photo_library_outlined, 'Gallery', route: '/gallery'),
+          _drawerTile(Icons.message_outlined, 'Messages', route: '/messages'),
+          _drawerTile(Icons.people_outline, 'Friends & Network', route: '/friends'),
+
+          // ─── Admin / Staff only ───
+          if (isAdmin) ...[
+            const Divider(height: 32, indent: 24, endIndent: 24),
+            _drawerTile(Icons.work_outline, 'Job Board Management', route: '/job_board_management'),
+            // Add more admin-only items here when you create those screens
+            // e.g. _drawerTile(Icons.analytics, 'Growth Metrics', route: '/growth_metrics'),
+          ],
+
+          const Spacer(),
+
+          const Divider(color: Color(0xFFE5E7EB), height: 1),
+
+          _drawerTile(Icons.settings_outlined, 'Settings', route: '/settings'),
+          _drawerTile(
+            Icons.logout,
+            'Logout',
+            isDestructive: true,
+            onTap: _logout,
+          ),
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+
+  Widget _drawerTile(
+    IconData icon,
+    String title, {
+    String? route,
+    bool active = false,
+    bool isDestructive = false,
+    VoidCallback? onTap,
+  }) {
+    final color = active
+        ? const Color(0xFF991B1B)
+        : (isDestructive ? Colors.redAccent : const Color(0xFF111827));
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 32),
+      leading: Icon(
+        icon,
+        size: 20,
+        color: color.withOpacity(active ? 1.0 : 0.75),
+      ),
+      title: Text(
+        title,
+        style: GoogleFonts.inter(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.4,
+          color: color,
+        ),
+      ),
+      selected: active,
+      selectedTileColor: const Color(0xFFFFF5F5),
+      onTap: () {
+        Navigator.pop(context); // close drawer
+        if (onTap != null) {
+          onTap();
+        } else if (route != null) {
+          Navigator.pushNamed(context, route);
+        }
+      },
+    );
+  }
+
+  // ────────────────────────────────────────────────
+  // Your existing UI helper methods (unchanged)
+  // ────────────────────────────────────────────────
 
   Widget _buildBadge(IconData icon, String text) {
     return Container(
@@ -365,7 +490,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         children: [
           Icon(icon, size: 12, color: const Color(0xFF6B7280)),
           const SizedBox(width: 6),
-          Text(text, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600, color: const Color(0xFF6B7280))),
+          Text(
+            text,
+            style: GoogleFonts.inter(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: const Color(0xFF6B7280),
+            ),
+          ),
         ],
       ),
     );
@@ -398,13 +530,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(5),
                       decoration: const BoxDecoration(color: Color(0xFF991B1B), shape: BoxShape.circle),
-                      child: Text('$badge', style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                      child: Text(
+                        '$badge',
+                        style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
               ],
             ),
             const SizedBox(height: 10),
-            Text(label, style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+            Text(
+              label,
+              style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+            ),
           ],
         ),
       ),
@@ -415,7 +553,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Column(
       children: [
         Text('$value', style: GoogleFonts.cormorantGaramond(fontSize: 28, fontWeight: FontWeight.w600)),
-        Text(label.toUpperCase(), style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: const Color(0xFF6B7280))),
+        Text(
+          label.toUpperCase(),
+          style: GoogleFonts.inter(
+            fontSize: 9,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.0,
+            color: const Color(0xFF6B7280),
+          ),
+        ),
       ],
     );
   }
@@ -425,9 +571,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Text(title, style: GoogleFonts.cormorantGaramond(fontSize: 24, fontWeight: FontWeight.w500, fontStyle: FontStyle.italic)),
+        Text(
+          title,
+          style: GoogleFonts.cormorantGaramond(
+            fontSize: 24,
+            fontWeight: FontWeight.w500,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
         if (action.isNotEmpty)
-          Text(action, style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1.5, color: const Color(0xFF991B1B))),
+          Text(
+            action,
+            style: GoogleFonts.inter(
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.5,
+              color: const Color(0xFF991B1B),
+            ),
+          ),
       ],
     );
   }
@@ -446,19 +607,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text((op['type'] ?? '').toUpperCase(), style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w900, color: const Color(0xFF991B1B), letterSpacing: 1)),
-              Text(op['location'] ?? '', style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF6B7280))),
+              Text(
+                (op['type'] ?? '').toUpperCase(),
+                style: GoogleFonts.inter(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w900,
+                  color: const Color(0xFF991B1B),
+                  letterSpacing: 1,
+                ),
+              ),
+              Text(
+                op['location'] ?? '',
+                style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF6B7280)),
+              ),
             ],
           ),
           const SizedBox(height: 12),
-          Text(op['title'] ?? '', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700)),
+          Text(
+            op['title'] ?? '',
+            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 4),
-          Text(op['company'] ?? '', style: GoogleFonts.inter(fontSize: 13, color: const Color(0xFF6B7280))),
+          Text(
+            op['company'] ?? '',
+            style: GoogleFonts.inter(fontSize: 13, color: const Color(0xFF6B7280)),
+          ),
           const SizedBox(height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Text('APPLY NOW', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1, color: const Color(0xFF991B1B))),
+              Text(
+                'APPLY NOW',
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1,
+                  color: const Color(0xFF991B1B),
+                ),
+              ),
               const SizedBox(width: 6),
               const Icon(Icons.arrow_forward_rounded, size: 14, color: Color(0xFF991B1B)),
             ],
@@ -472,13 +658,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB), width: 0.5))),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB), width: 0.5)),
+      ),
       child: Row(
         children: [
           Container(
             width: 44,
             height: 44,
-            decoration: BoxDecoration(color: Colors.white, border: Border.all(color: const Color(0xFFE5E7EB))),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
             child: Center(
               child: Text(
                 event['date']?.split(' ').last ?? '??',
@@ -491,8 +682,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(event['title'] ?? '', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600)),
-                Text(event['type']?.toUpperCase() ?? '', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.w800, color: const Color(0xFF6B7280), letterSpacing: 0.5)),
+                Text(
+                  event['title'] ?? '',
+                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  event['type']?.toUpperCase() ?? '',
+                  style: GoogleFonts.inter(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFF6B7280),
+                    letterSpacing: 0.5,
+                  ),
+                ),
               ],
             ),
           ),
@@ -516,12 +718,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
               color: Colors.white,
             ),
             child: Center(
-              child: Text(alum['name'][0], style: GoogleFonts.cormorantGaramond(fontSize: 24, fontStyle: FontStyle.italic, color: const Color(0xFF991B1B))),
+              child: Text(
+                alum['name'][0],
+                style: GoogleFonts.cormorantGaramond(
+                  fontSize: 24,
+                  fontStyle: FontStyle.italic,
+                  color: const Color(0xFF991B1B),
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 12),
-          Text(alum['name'].split(' ').first, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700), textAlign: TextAlign.center),
-          Text(alum['year'], style: GoogleFonts.inter(fontSize: 9, color: const Color(0xFF6B7280))),
+          Text(
+            alum['name'].split(' ').first,
+            style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700),
+            textAlign: TextAlign.center,
+          ),
+          Text(
+            alum['year'],
+            style: GoogleFonts.inter(fontSize: 9, color: const Color(0xFF6B7280)),
+          ),
         ],
       ),
     );
@@ -531,61 +747,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 20),
-        child: Text(message, style: GoogleFonts.inter(color: const Color(0xFF6B7280), fontSize: 12, fontStyle: FontStyle.italic)),
-      ),
-    );
-  }
-
-  Widget _buildDrawer() {
-    return Drawer(
-      backgroundColor: Colors.white,
-      elevation: 0,
-      child: Column(
-        children: [
-          DrawerHeader(
-            padding: const EdgeInsets.all(32),
-            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB), width: 0.5))),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Text('PORTAL', style: GoogleFonts.cormorantGaramond(fontSize: 28, fontStyle: FontStyle.italic, color: const Color(0xFF991B1B))),
-                const SizedBox(height: 8),
-                Text(userName.toUpperCase(), style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 2)),
-              ],
-            ),
+        child: Text(
+          message,
+          style: GoogleFonts.inter(
+            color: const Color(0xFF6B7280),
+            fontSize: 12,
+            fontStyle: FontStyle.italic,
           ),
-          _drawerTile(Icons.dashboard_outlined, 'DASHBOARD', active: true),
-          _drawerTile(Icons.person_outline, 'MY PROFILE', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AlumniProfileScreen()))),
-          _drawerTile(Icons.book_outlined, 'DISCUSSIONS', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DiscussionsScreen()))),
-          _drawerTile(Icons.event_outlined, 'EVENTS', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EventListScreen()))),
-          _drawerTile(Icons.campaign_outlined, 'ANNOUNCEMENTS', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AnnouncementsScreen()))),
-          _drawerTile(Icons.photo_library_outlined, 'GALLERY', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GalleryScreen()))),
-          _drawerTile(Icons.book_outlined, 'MESSAGES', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MessagesScreen()))),
-          _drawerTile(Icons.book_outlined, 'FRIENDS', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FriendsScreen()))),
-          _drawerTile(Icons.book_outlined, 'JOBS AND OPPORTUNITIES', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const JobBoardManagementScreen()))),
-          _drawerTile(Icons.book_outlined, 'SETTINGS', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()))),
-
-          const Spacer(),
-
-          const Divider(color: Color(0xFFE5E7EB), height: 1),
-          _drawerTile(Icons.logout, 'LOGOUT', isDestructive: true, onTap: _logout),
-          const SizedBox(height: 40),
-        ],
+        ),
       ),
-    );
-  }
-
-  Widget _drawerTile(IconData icon, String title, {bool active = false, bool isDestructive = false, VoidCallback? onTap}) {
-    final color = active ? const Color(0xFF991B1B) : (isDestructive ? Colors.red : const Color(0xFF111827));
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 32),
-      leading: Icon(icon, size: 20, color: active ? color : const Color(0xFF6B7280)),
-      title: Text(title, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1.5, color: color)),
-      onTap: () {
-        Navigator.pop(context);
-        if (onTap != null) onTap();
-      },
     );
   }
 }
