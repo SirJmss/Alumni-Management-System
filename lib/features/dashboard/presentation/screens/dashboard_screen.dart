@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
+import 'package:alumni/features/notification/notification_screen.dart';
+import 'package:alumni/features/notification/notification_service.dart';
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -62,11 +65,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     try {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
       if (doc.exists) {
         final data = doc.data()!;
         setState(() {
-          userName = data['fullName'] ?? data['name'] ?? user.displayName ?? 'Guest';
+          userName = data['fullName'] ??
+              data['name'] ??
+              user.displayName ??
+              'Guest';
           userRole = data['role'] ?? 'Alumni';
           userPhotoUrl = data['profilePhotoUrl'] ?? user.photoURL;
         });
@@ -82,20 +91,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final now = Timestamp.now();
       final results = await Future.wait([
         firestore.collection('users').count().get(),
-        firestore.collection('events').where('startDate', isGreaterThan: now).count().get(),
-        firestore.collection('courses').count().get(),
         firestore
-            .collection('messages')
-            .where('toUid', isEqualTo: FirebaseAuth.instance.currentUser?.uid)
-            .where('read', isEqualTo: false)
+            .collection('events')
+            .where('startDate', isGreaterThan: now)
             .count()
             .get(),
+        firestore.collection('courses').count().get(),
       ]);
       setState(() {
         totalAlumni = results[0].count ?? 0;
         upcomingEvents = results[1].count ?? 0;
         activeCourses = results[2].count ?? 0;
-        unreadMessages = results[3].count ?? 0;
       });
     } catch (e) {
       debugPrint('Aggregates error: $e');
@@ -140,7 +146,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final date = (data['startDate'] as Timestamp?)?.toDate();
           return {
             'title': data['title'] ?? 'Event',
-            'date': date != null ? DateFormat('MMM dd').format(date) : 'TBD',
+            'date': date != null
+                ? DateFormat('MMM dd').format(date)
+                : 'TBD',
             'type': data['type'] ?? 'Campus Event',
           };
         }).toList();
@@ -151,11 +159,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _loadNearbyAlumni() async {
-    // This is mock data – replace with real geo query later if needed
     setState(() {
       nearbyAlumni = [
-        {'name': 'Sarah Jenkins', 'role': 'Principal Architect', 'year': '’14'},
-        {'name': 'Robert Chen', 'role': 'Urban Historian', 'year': '’11'},
+        {
+          'name': 'Sarah Jenkins',
+          'role': 'Principal Architect',
+          'year': '\'14'
+        },
+        {
+          'name': 'Robert Chen',
+          'role': 'Urban Historian',
+          'year': '\'11'
+        },
       ];
     });
   }
@@ -163,7 +178,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _logout() async {
     await FirebaseAuth.instance.signOut();
     if (mounted) {
-      Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+      Navigator.pushNamedAndRemoveUntil(
+          context, '/login', (route) => false);
     }
   }
 
@@ -180,6 +196,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     const darkText = Color(0xFF111827);
     const mutedText = Color(0xFF6B7280);
     const borderSubtle = Color(0xFFE5E7EB);
+    final currentUid =
+        FirebaseAuth.instance.currentUser?.uid ?? '';
 
     return Scaffold(
       backgroundColor: const Color(0xFFFDFDFD),
@@ -213,25 +231,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
         actions: [
-          IconButton(
-            icon: Stack(
-              alignment: Alignment.topRight,
-              children: [
-                const Icon(Icons.notifications_none_rounded, color: darkText, size: 22),
-                if (unreadMessages > 0)
-                  Positioned(
-                    right: 2,
-                    top: 2,
-                    child: Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: const BoxDecoration(color: brandRed, shape: BoxShape.circle),
-                      constraints: const BoxConstraints(minWidth: 10, minHeight: 10),
+          // ─── Live notification bell ───
+          StreamBuilder<int>(
+            stream:
+                NotificationService.unreadCountStream(currentUid),
+            builder: (context, snapshot) {
+              final count = snapshot.data ?? 0;
+              return IconButton(
+                tooltip: 'Notifications',
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(
+                      Icons.notifications_none_rounded,
+                      color: darkText,
+                      size: 24,
                     ),
+                    if (count > 0)
+                      Positioned(
+                        right: -2,
+                        top: -2,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: brandRed,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Text(
+                            count > 99 ? '99+' : '$count',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const NotificationsScreen(),
                   ),
-              ],
-            ),
-            onPressed: () {
-              // TODO: Notifications screen if you create one later
+                ),
+              );
             },
           ),
           const SizedBox(width: 12),
@@ -239,17 +283,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       drawer: _buildDrawer(),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator(color: brandRed, strokeWidth: 2))
+          ? const Center(
+              child: CircularProgressIndicator(
+                  color: brandRed, strokeWidth: 2))
           : RefreshIndicator(
               onRefresh: _loadAllData,
               color: brandRed,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 24, vertical: 32),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Welcome message
+                    // ─── Welcome message ───
                     Text(
                       'Welcome home,\n${userName.split(' ').first}.',
                       style: GoogleFonts.cormorantGaramond(
@@ -262,72 +309,123 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Badges
+                    // ─── Badges ───
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        _buildBadge(Icons.school_outlined, 'Class of 2012'),
-                        _buildBadge(Icons.auto_stories_outlined, 'Architecture'),
-                        _buildBadge(Icons.location_on_outlined, 'Zurich, CH'),
+                        _buildBadge(
+                            Icons.school_outlined, 'Class of 2012'),
+                        _buildBadge(Icons.auto_stories_outlined,
+                            'Architecture'),
+                        _buildBadge(Icons.location_on_outlined,
+                            'Zurich, CH'),
                       ],
                     ),
                     const SizedBox(height: 40),
 
-                    // Quick actions
-                    SizedBox(
-                      height: 90,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: [
-                          _buildActionCircle('Network', Icons.people_outline, () {
-                            Navigator.pushNamed(context, '/friends');
-                          }),
-                          _buildActionCircle('Messages', Icons.mail_outline, () {
-                            Navigator.pushNamed(context, '/messages');
-                          }, badge: unreadMessages),
-                          _buildActionCircle('Update', Icons.edit_outlined, () {
-                            Navigator.pushNamed(context, '/profile');
-                          }),
-                          _buildActionCircle('Library', Icons.bookmark_border, () {}),
-                        ],
-                      ),
+                    // ─── Quick actions with live notification badge ───
+                    StreamBuilder<int>(
+                      stream: NotificationService.unreadCountStream(
+                          currentUid),
+                      builder: (context, snapshot) {
+                        final notifCount = snapshot.data ?? 0;
+                        return SizedBox(
+                          height: 90,
+                          child: ListView(
+                            scrollDirection: Axis.horizontal,
+                            children: [
+                              _buildActionCircle(
+                                'Network',
+                                Icons.people_outline,
+                                () => Navigator.pushNamed(
+                                    context, '/friends'),
+                              ),
+                              _buildActionCircle(
+                                'Messages',
+                                Icons.mail_outline,
+                                () => Navigator.pushNamed(
+                                    context, '/messages'),
+                                badge: unreadMessages,
+                              ),
+                              _buildActionCircle(
+                                'Alerts',
+                                Icons.notifications_none_rounded,
+                                () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const NotificationsScreen(),
+                                  ),
+                                ),
+                                badge: notifCount,
+                              ),
+                              _buildActionCircle(
+                                'Update',
+                                Icons.edit_outlined,
+                                () => Navigator.pushNamed(
+                                    context, '/profile'),
+                              ),
+                              _buildActionCircle(
+                                'Library',
+                                Icons.bookmark_border,
+                                () {},
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
                     const SizedBox(height: 40),
 
-                    // Stats row
+                    // ─── Stats row ───
                     Container(
-                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      padding:
+                          const EdgeInsets.symmetric(vertical: 24),
                       decoration: const BoxDecoration(
                         border: Border(
-                          top: BorderSide(color: borderSubtle, width: 0.5),
-                          bottom: BorderSide(color: borderSubtle, width: 0.5),
+                          top: BorderSide(
+                              color: borderSubtle, width: 0.5),
+                          bottom: BorderSide(
+                              color: borderSubtle, width: 0.5),
                         ),
                       ),
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        mainAxisAlignment:
+                            MainAxisAlignment.spaceAround,
                         children: [
                           _buildStatItem(totalAlumni, 'Members'),
-                          Container(width: 0.5, height: 30, color: borderSubtle),
+                          Container(
+                              width: 0.5,
+                              height: 30,
+                              color: borderSubtle),
                           _buildStatItem(upcomingEvents, 'Events'),
-                          Container(width: 0.5, height: 30, color: borderSubtle),
+                          Container(
+                              width: 0.5,
+                              height: 30,
+                              color: borderSubtle),
                           _buildStatItem(activeCourses, 'Courses'),
                         ],
                       ),
                     ),
                     const SizedBox(height: 48),
 
-                    // Curated Opportunities
-                    _sectionHeader('Curated Opportunities', 'VIEW BOARD'),
+                    // ─── Friend requests banner ───
+                    _FriendRequestsBanner(currentUid: currentUid),
+
+                    // ─── Curated Opportunities ───
+                    _sectionHeader(
+                        'Curated Opportunities', 'VIEW BOARD'),
                     const SizedBox(height: 20),
                     if (recentOpportunities.isEmpty)
-                      _buildEmptyState('No opportunities currently listed')
+                      _buildEmptyState(
+                          'No opportunities currently listed')
                     else
                       ...recentOpportunities.map(_opportunityCard),
 
                     const SizedBox(height: 48),
 
-                    // Calendar
+                    // ─── Calendar ───
                     _sectionHeader('Your Calendar', ''),
                     const SizedBox(height: 20),
                     if (upcomingCalendar.isEmpty)
@@ -337,7 +435,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                     const SizedBox(height: 48),
 
-                    // Nearby Alumni
+                    // ─── Nearby Alumni ───
                     _sectionHeader('Alumni Near You', 'DISCOVER'),
                     const SizedBox(height: 24),
                     SizedBox(
@@ -345,7 +443,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
                         itemCount: nearbyAlumni.length,
-                        itemBuilder: (context, index) => _nearbyAlumniCard(nearbyAlumni[index]),
+                        itemBuilder: (context, index) =>
+                            _nearbyAlumniCard(nearbyAlumni[index]),
                       ),
                     ),
                     const SizedBox(height: 60),
@@ -357,9 +456,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // ────────────────────────────────────────────────
-  // Drawer with proper icons and named routes
+  // Drawer
   // ────────────────────────────────────────────────
-
   Widget _buildDrawer() {
     return Drawer(
       backgroundColor: Colors.white,
@@ -369,7 +467,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           DrawerHeader(
             padding: const EdgeInsets.all(32),
             decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB), width: 0.5)),
+              border: Border(
+                  bottom: BorderSide(
+                      color: Color(0xFFE5E7EB), width: 0.5)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -396,30 +496,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ),
-
-          // ─── Common menu items ───
-          _drawerTile(Icons.dashboard_outlined, 'Dashboard', active: true),
-          _drawerTile(Icons.person_outline, 'My Profile', route: '/profile'),
-          _drawerTile(Icons.forum_outlined, 'Discussions', route: '/discussions'),
-          _drawerTile(Icons.event_available_outlined, 'Events', route: '/events'),
-          _drawerTile(Icons.campaign_outlined, 'Announcements', route: '/announcements'),
-          _drawerTile(Icons.photo_library_outlined, 'Gallery', route: '/gallery'),
-          _drawerTile(Icons.message_outlined, 'Messages', route: '/messages'),
-          _drawerTile(Icons.people_outline, 'Friends & Network', route: '/friends'),
-
-          // ─── Admin / Staff only ───
+          _drawerTile(Icons.dashboard_outlined, 'Dashboard',
+              active: true),
+          _drawerTile(Icons.person_outline, 'My Profile',
+              route: '/profile'),
+          _drawerTile(Icons.forum_outlined, 'Discussions',
+              route: '/discussions'),
+          _drawerTile(Icons.event_available_outlined, 'Events',
+              route: '/events'),
+          _drawerTile(Icons.campaign_outlined, 'Announcements',
+              route: '/announcements'),
+          _drawerTile(Icons.photo_library_outlined, 'Gallery',
+              route: '/gallery'),
+          _drawerTile(Icons.message_outlined, 'Messages',
+              route: '/messages'),
+          _drawerTile(Icons.people_outline, 'Friends & Network',
+              route: '/friends'),
+          _drawerTile(
+            Icons.notifications_outlined,
+            'Notifications',
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => const NotificationsScreen()),
+            ),
+          ),
           if (isAdmin) ...[
             const Divider(height: 32, indent: 24, endIndent: 24),
-            _drawerTile(Icons.work_outline, 'Job Board Management', route: '/job_board_management'),
-            // Add more admin-only items here when you create those screens
-            // e.g. _drawerTile(Icons.analytics, 'Growth Metrics', route: '/growth_metrics'),
+            _drawerTile(Icons.work_outline, 'Job Board Management',
+                route: '/job_board_management'),
           ],
-
           const Spacer(),
-
           const Divider(color: Color(0xFFE5E7EB), height: 1),
-
-          _drawerTile(Icons.settings_outlined, 'Settings', route: '/settings'),
+          _drawerTile(Icons.settings_outlined, 'Settings',
+              route: '/settings'),
           _drawerTile(
             Icons.logout,
             'Logout',
@@ -442,15 +552,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }) {
     final color = active
         ? const Color(0xFF991B1B)
-        : (isDestructive ? Colors.redAccent : const Color(0xFF111827));
+        : (isDestructive
+            ? Colors.redAccent
+            : const Color(0xFF111827));
 
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 32),
-      leading: Icon(
-        icon,
-        size: 20,
-        color: color.withOpacity(active ? 1.0 : 0.75),
-      ),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 32),
+      leading: Icon(icon,
+          size: 20,
+          color: color.withOpacity(active ? 1.0 : 0.75)),
       title: Text(
         title,
         style: GoogleFonts.inter(
@@ -463,7 +574,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       selected: active,
       selectedTileColor: const Color(0xFFFFF5F5),
       onTap: () {
-        Navigator.pop(context); // close drawer
+        Navigator.pop(context);
         if (onTap != null) {
           onTap();
         } else if (route != null) {
@@ -474,12 +585,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // ────────────────────────────────────────────────
-  // Your existing UI helper methods (unchanged)
+  // UI helpers
   // ────────────────────────────────────────────────
-
   Widget _buildBadge(IconData icon, String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border.all(color: const Color(0xFFE5E7EB)),
@@ -503,7 +614,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildActionCircle(String label, IconData icon, VoidCallback onTap, {int badge = 0}) {
+  Widget _buildActionCircle(
+    String label,
+    IconData icon,
+    VoidCallback onTap, {
+    int badge = 0,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(right: 28),
       child: GestureDetector(
@@ -518,10 +634,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   height: 54,
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                    border: Border.all(
+                        color: const Color(0xFFE5E7EB)),
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Icon(icon, color: const Color(0xFF111827), size: 22),
+                  child: Icon(icon,
+                      color: const Color(0xFF111827), size: 22),
                 ),
                 if (badge > 0)
                   Positioned(
@@ -529,10 +647,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     right: -4,
                     child: Container(
                       padding: const EdgeInsets.all(5),
-                      decoration: const BoxDecoration(color: Color(0xFF991B1B), shape: BoxShape.circle),
+                      decoration: const BoxDecoration(
+                          color: Color(0xFF991B1B),
+                          shape: BoxShape.circle),
                       child: Text(
-                        '$badge',
-                        style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                        badge > 99 ? '99+' : '$badge',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),
@@ -541,7 +664,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 10),
             Text(
               label,
-              style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+              style: GoogleFonts.inter(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5),
             ),
           ],
         ),
@@ -552,7 +678,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildStatItem(int value, String label) {
     return Column(
       children: [
-        Text('$value', style: GoogleFonts.cormorantGaramond(fontSize: 28, fontWeight: FontWeight.w600)),
+        Text(
+          '$value',
+          style: GoogleFonts.cormorantGaramond(
+              fontSize: 28, fontWeight: FontWeight.w600),
+        ),
         Text(
           label.toUpperCase(),
           style: GoogleFonts.inter(
@@ -618,19 +748,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               Text(
                 op['location'] ?? '',
-                style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF6B7280)),
+                style: GoogleFonts.inter(
+                    fontSize: 11,
+                    color: const Color(0xFF6B7280)),
               ),
             ],
           ),
           const SizedBox(height: 12),
           Text(
             op['title'] ?? '',
-            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700),
+            style: GoogleFonts.inter(
+                fontSize: 16, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 4),
           Text(
             op['company'] ?? '',
-            style: GoogleFonts.inter(fontSize: 13, color: const Color(0xFF6B7280)),
+            style: GoogleFonts.inter(
+                fontSize: 13, color: const Color(0xFF6B7280)),
           ),
           const SizedBox(height: 20),
           Row(
@@ -646,7 +780,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
               const SizedBox(width: 6),
-              const Icon(Icons.arrow_forward_rounded, size: 14, color: Color(0xFF991B1B)),
+              const Icon(Icons.arrow_forward_rounded,
+                  size: 14, color: Color(0xFF991B1B)),
             ],
           ),
         ],
@@ -659,7 +794,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB), width: 0.5)),
+        border: Border(
+            bottom:
+                BorderSide(color: Color(0xFFE5E7EB), width: 0.5)),
       ),
       child: Row(
         children: [
@@ -668,12 +805,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             height: 44,
             decoration: BoxDecoration(
               color: Colors.white,
-              border: Border.all(color: const Color(0xFFE5E7EB)),
+              border:
+                  Border.all(color: const Color(0xFFE5E7EB)),
             ),
             child: Center(
               child: Text(
                 event['date']?.split(' ').last ?? '??',
-                style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700),
+                style: GoogleFonts.inter(
+                    fontSize: 16, fontWeight: FontWeight.w700),
               ),
             ),
           ),
@@ -684,7 +823,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 Text(
                   event['title'] ?? '',
-                  style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600),
+                  style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600),
                 ),
                 Text(
                   event['type']?.toUpperCase() ?? '',
@@ -714,7 +855,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             height: 60,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFFE5E7EB)),
+              border:
+                  Border.all(color: const Color(0xFFE5E7EB)),
               color: Colors.white,
             ),
             child: Center(
@@ -731,12 +873,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(height: 12),
           Text(
             alum['name'].split(' ').first,
-            style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w700),
+            style: GoogleFonts.inter(
+                fontSize: 11, fontWeight: FontWeight.w700),
             textAlign: TextAlign.center,
           ),
           Text(
             alum['year'],
-            style: GoogleFonts.inter(fontSize: 9, color: const Color(0xFF6B7280)),
+            style: GoogleFonts.inter(
+                fontSize: 9, color: const Color(0xFF6B7280)),
           ),
         ],
       ),
@@ -756,6 +900,315 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// Friend Requests Banner
+// ─────────────────────────────────────────────
+class _FriendRequestsBanner extends StatelessWidget {
+  final String currentUid;
+
+  const _FriendRequestsBanner({required this.currentUid});
+
+Future<void> _accept(
+    BuildContext context, String fromUid, String requestId) async {
+  try {
+    debugPrint('Banner accept - fromUid: $fromUid, requestId: $requestId');
+    debugPrint('Current user: ${FirebaseAuth.instance.currentUser?.uid}');
+
+    // ─── Try direct delete first using the doc.id from the stream ───
+    final batch = FirebaseFirestore.instance.batch();
+    final now = FieldValue.serverTimestamp();
+
+    batch.set(
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(currentUid)
+            .collection('connections')
+            .doc(fromUid),
+        {'connectedAt': now});
+
+    batch.set(
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(fromUid)
+            .collection('connections')
+            .doc(currentUid),
+        {'connectedAt': now});
+
+    batch.delete(FirebaseFirestore.instance
+        .collection('friend_requests')
+        .doc(requestId));
+
+    batch.set(
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(currentUid),
+        {'connectionsCount': FieldValue.increment(1)},
+        SetOptions(merge: true));
+
+    batch.set(
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(fromUid),
+        {'connectionsCount': FieldValue.increment(1)},
+        SetOptions(merge: true));
+
+    await batch.commit();
+
+    final currentUserDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(currentUid)
+        .get();
+    final acceptorName =
+        currentUserDoc.data()?['name']?.toString() ?? 'Someone';
+
+    await NotificationService.sendFriendAcceptedNotification(
+      toUid: fromUid,
+      acceptorName: acceptorName,
+      acceptorUid: currentUid,
+    );
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Connection accepted!'),
+            backgroundColor: Colors.green),
+      );
+    }
+  } catch (e) {
+    debugPrint('Banner accept error: $e');
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red),
+      );
+    }
+  }
+}
+
+  Future<void> _decline(
+      BuildContext context, String requestId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('friend_requests')
+          .doc(requestId)
+          .delete();
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('friend_requests')
+          .where('toUid', isEqualTo: currentUid)
+          .where('status', isEqualTo: 'pending')
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        final requests = snapshot.data!.docs;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Friend Requests',
+                  style: GoogleFonts.cormorantGaramond(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w500,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF991B1B),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${requests.length}',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ...requests.map((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              final fromUid =
+                  data['fromUid']?.toString() ?? '';
+              final requestId = doc.id;
+
+              return FutureBuilder<DocumentSnapshot>(
+                future: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(fromUid)
+                    .get(),
+                builder: (context, userSnap) {
+                  if (!userSnap.hasData) {
+                    return const Padding(
+                      padding:
+                          EdgeInsets.symmetric(vertical: 8),
+                      child: LinearProgressIndicator(
+                          color: Color(0xFF991B1B)),
+                    );
+                  }
+
+                  final user = userSnap.data!.data()
+                          as Map<String, dynamic>? ??
+                      {};
+                  final name =
+                      user['name']?.toString() ?? 'Unknown';
+                  final avatarUrl =
+                      user['profilePictureUrl']?.toString() ??
+                          '';
+                  final headline = user['headline']
+                              ?.toString()
+                              .isNotEmpty ==
+                          true
+                      ? user['headline'].toString()
+                      : user['role']?.toString() ?? '';
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: const Color(0xFFE5E7EB)),
+                    ),
+                    child: Row(
+                      children: [
+                        // ─── Avatar ───
+                        CircleAvatar(
+                          radius: 24,
+                          backgroundColor:
+                              const Color(0xFFE5E7EB),
+                          backgroundImage: avatarUrl.isNotEmpty
+                              ? NetworkImage(avatarUrl)
+                              : null,
+                          child: avatarUrl.isEmpty
+                              ? const Icon(Icons.person,
+                                  color: Color(0xFF991B1B))
+                              : null,
+                        ),
+                        const SizedBox(width: 12),
+
+                        // ─── Name + headline ───
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                name,
+                                style: GoogleFonts.inter(
+                                    fontSize: 14,
+                                    fontWeight:
+                                        FontWeight.w700),
+                              ),
+                              if (headline.isNotEmpty)
+                                Text(
+                                  headline,
+                                  style: GoogleFonts.inter(
+                                      fontSize: 12,
+                                      color: const Color(
+                                          0xFF6B7280)),
+                                  maxLines: 1,
+                                  overflow:
+                                      TextOverflow.ellipsis,
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+
+                        // ─── Accept button ───
+                        ElevatedButton(
+                          onPressed: () => _accept(
+                              context, fromUid, requestId),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor:
+                                const Color(0xFF991B1B),
+                            foregroundColor: Colors.white,
+                            padding:
+                                const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize
+                                .shrinkWrap,
+                            shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(8)),
+                          ),
+                          child: Text('Accept',
+                              style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight:
+                                      FontWeight.w600)),
+                        ),
+                        const SizedBox(width: 6),
+
+                        // ─── Decline button ───
+                        OutlinedButton(
+                          onPressed: () =>
+                              _decline(context, requestId),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor:
+                                const Color(0xFF6B7280),
+                            side: const BorderSide(
+                                color: Color(0xFFE5E7EB)),
+                            padding:
+                                const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize
+                                .shrinkWrap,
+                            shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(8)),
+                          ),
+                          child: Text('Decline',
+                              style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight:
+                                      FontWeight.w600)),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            }),
+            const SizedBox(height: 48),
+          ],
+        );
+      },
     );
   }
 }

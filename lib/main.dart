@@ -16,13 +16,14 @@ import 'package:alumni/features/admin/presentation/screens/reunion_planning_scre
 import 'package:alumni/features/admin/presentation/screens/career_milestones_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/announcement_management_screen.dart';
 import 'package:alumni/features/event/presentation/screens/discussions_screen.dart';
-import 'package:alumni/features/event/presentation/screens/messages_screen.dart';
-import 'package:alumni/features/event/presentation/screens/friends_screen.dart';
+import 'package:alumni/features/communication/messages_screen.dart';
+import 'package:alumni/features/network/friends_screen.dart';
 import 'package:alumni/features/auth/presentation/screens/settings_screen.dart';
 import 'package:alumni/features/profile/presentation/screens/profile_screen.dart';       // AlumniProfileScreen
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
@@ -72,6 +73,8 @@ class MyApp extends StatelessWidget {
     );
   }
 }
+
+
 
 // LandingPage (unchanged from your version)
 class LandingPage extends StatelessWidget {
