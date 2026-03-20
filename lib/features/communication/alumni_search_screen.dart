@@ -37,17 +37,13 @@ class _AlumniSearchScreenState extends State<AlumniSearchScreen> {
       setState(() => _results = []);
       return;
     }
-
     setState(() => _isSearching = true);
-
     try {
       final q = query.trim().toLowerCase();
-
       final snapshot = await FirebaseFirestore.instance
           .collection('users')
           .limit(500)
           .get();
-
       final filtered = snapshot.docs
           .where((d) => d.id != currentUid)
           .where((d) {
@@ -57,7 +53,6 @@ class _AlumniSearchScreenState extends State<AlumniSearchScreen> {
           })
           .map((d) => {'uid': d.id, ...d.data()})
           .toList();
-
       if (mounted) {
         setState(() {
           _results = filtered;
@@ -75,12 +70,10 @@ class _AlumniSearchScreenState extends State<AlumniSearchScreen> {
         .collection('chats')
         .where('memberIds', arrayContains: currentUid)
         .get();
-
     for (final doc in existing.docs) {
       final members = List<String>.from(doc['memberIds'] ?? []);
       if (members.contains(otherUid)) return doc.id;
     }
-
     final ref =
         await FirebaseFirestore.instance.collection('chats').add({
       'memberIds': [currentUid, otherUid],
@@ -210,21 +203,17 @@ class _AlumniSearchScreenState extends State<AlumniSearchScreen> {
                                   color: AppColors.brandRed),
                         ),
                       ),
-                      title: Text(
-                        name,
-                        style: GoogleFonts.inter(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600),
-                      ),
+                      title: Text(name,
+                          style: GoogleFonts.inter(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600)),
                       subtitle: headline.isNotEmpty
-                          ? Text(
-                              headline,
+                          ? Text(headline,
                               style: GoogleFonts.inter(
                                   fontSize: 13,
                                   color: AppColors.mutedText),
                               maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            )
+                              overflow: TextOverflow.ellipsis)
                           : null,
                       trailing: isStarting
                           ? const SizedBox(
@@ -232,15 +221,13 @@ class _AlumniSearchScreenState extends State<AlumniSearchScreen> {
                               height: 24,
                               child: CircularProgressIndicator(
                                   strokeWidth: 2.5,
-                                  color: AppColors.brandRed),
-                            )
+                                  color: AppColors.brandRed))
                           : IconButton(
                               icon: const Icon(
                                   Icons.chat_bubble_outline,
                                   color: AppColors.brandRed),
                               onPressed: () =>
-                                  _startChat(uid, name, avatarUrl),
-                            ),
+                                  _startChat(uid, name, avatarUrl)),
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -260,11 +247,8 @@ class _AlumniSearchScreenState extends State<AlumniSearchScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            hasQuery ? Icons.search_off : Icons.people_outline,
-            size: 64,
-            color: Colors.grey.shade300,
-          ),
+          Icon(hasQuery ? Icons.search_off : Icons.people_outline,
+              size: 64, color: Colors.grey.shade300),
           const SizedBox(height: 16),
           Text(
             hasQuery ? 'No alumni found' : 'Search for alumni',
@@ -290,7 +274,6 @@ class _AlumniSearchScreenState extends State<AlumniSearchScreen> {
 // ─────────────────────────────────────────────
 class AlumniPublicProfileScreen extends StatefulWidget {
   final String uid;
-
   const AlumniPublicProfileScreen({super.key, required this.uid});
 
   @override
@@ -303,12 +286,9 @@ class _AlumniPublicProfileScreenState
   Map<String, dynamic>? userData;
   String _myRole = '';
   bool isLoading = true;
-
   bool isFollowing = false;
   bool isFollowLoading = false;
-
   bool isChatLoading = false;
-
   bool _isFriend = false;
   bool _requestSent = false;
   bool _requestReceived = false;
@@ -333,7 +313,7 @@ class _AlumniPublicProfileScreenState
         FirebaseFirestore.instance
             .collection('users')
             .doc(currentUid)
-            .get(), // fetch current user's role
+            .get(),
         FirebaseFirestore.instance
             .collection('users')
             .doc(widget.uid)
@@ -385,27 +365,20 @@ class _AlumniPublicProfileScreenState
 
   // ─── Role helpers ───
   bool get _isAlumni => _myRole == 'alumni';
-  bool get _canFollow =>
-      _myRole == 'alumni' ||
-      _myRole == 'admin' ||
-      _myRole == 'staff' ||
-      _myRole == 'moderator' ||
-      _myRole == 'registrar';
   bool get _targetIsAlumni =>
       userData?['role']?.toString().toLowerCase() == 'alumni';
+  bool get _canFollow => _myRole == 'alumni';
 
   // ─── Follow / Unfollow ───
   Future<void> _toggleFollow() async {
     if (!_canFollow) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('You are not allowed to follow alumni'),
-          backgroundColor: Colors.orange,
-        ),
+            content: Text('You are not allowed to follow alumni'),
+            backgroundColor: Colors.orange),
       );
       return;
     }
-
     setState(() => isFollowLoading = true);
     try {
       final followerRef = FirebaseFirestore.instance
@@ -413,93 +386,78 @@ class _AlumniPublicProfileScreenState
           .doc(widget.uid)
           .collection('followers')
           .doc(currentUid);
-
       final followingRef = FirebaseFirestore.instance
           .collection('users')
           .doc(currentUid)
           .collection('following')
           .doc(widget.uid);
-
       final batch = FirebaseFirestore.instance.batch();
-
       if (isFollowing) {
         batch.delete(followerRef);
         batch.delete(followingRef);
         batch.set(
-          FirebaseFirestore.instance
-              .collection('users')
-              .doc(widget.uid),
-          {'followersCount': FieldValue.increment(-1)},
-          SetOptions(merge: true),
-        );
+            FirebaseFirestore.instance
+                .collection('users')
+                .doc(widget.uid),
+            {'followersCount': FieldValue.increment(-1)},
+            SetOptions(merge: true));
         batch.set(
-          FirebaseFirestore.instance
-              .collection('users')
-              .doc(currentUid),
-          {'followingCount': FieldValue.increment(-1)},
-          SetOptions(merge: true),
-        );
+            FirebaseFirestore.instance
+                .collection('users')
+                .doc(currentUid),
+            {'followingCount': FieldValue.increment(-1)},
+            SetOptions(merge: true));
       } else {
         batch.set(followerRef,
             {'followedAt': FieldValue.serverTimestamp()});
         batch.set(followingRef,
             {'followedAt': FieldValue.serverTimestamp()});
         batch.set(
-          FirebaseFirestore.instance
-              .collection('users')
-              .doc(widget.uid),
-          {'followersCount': FieldValue.increment(1)},
-          SetOptions(merge: true),
-        );
+            FirebaseFirestore.instance
+                .collection('users')
+                .doc(widget.uid),
+            {'followersCount': FieldValue.increment(1)},
+            SetOptions(merge: true));
         batch.set(
-          FirebaseFirestore.instance
-              .collection('users')
-              .doc(currentUid),
-          {'followingCount': FieldValue.increment(1)},
-          SetOptions(merge: true),
-        );
+            FirebaseFirestore.instance
+                .collection('users')
+                .doc(currentUid),
+            {'followingCount': FieldValue.increment(1)},
+            SetOptions(merge: true));
       }
-
       await batch.commit();
-
       if (mounted) {
         setState(() => isFollowing = !isFollowing);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(isFollowing
-                ? 'You are now following ${_safe('name')}'
-                : 'Unfollowed ${_safe('name')}'),
-            backgroundColor:
-                isFollowing ? Colors.green : AppColors.mutedText,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(isFollowing
+              ? 'You are now following ${_safe('name')}'
+              : 'Unfollowed ${_safe('name')}'),
+          backgroundColor:
+              isFollowing ? Colors.green : AppColors.mutedText,
+          duration: const Duration(seconds: 2),
+        ));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red));
       }
     } finally {
       if (mounted) setState(() => isFollowLoading = false);
     }
   }
 
-  // ─── Send friend request (alumni only) ───
+  // ─── Send friend request ───
   Future<void> _sendFriendRequest() async {
     if (!_isAlumni || !_targetIsAlumni) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Friend requests are only between alumni'),
-          backgroundColor: Colors.orange,
-        ),
+            content: Text('Friend requests are only between alumni'),
+            backgroundColor: Colors.orange),
       );
       return;
     }
-
     setState(() => _isFriendLoading = true);
     try {
       await FirebaseFirestore.instance
@@ -511,21 +469,17 @@ class _AlumniPublicProfileScreenState
         'status': 'pending',
         'createdAt': FieldValue.serverTimestamp(),
       });
-
-      // ─── Notify the receiver ───
       final myDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(currentUid)
           .get();
       final senderName =
           myDoc.data()?['name']?.toString() ?? 'Someone';
-
       await NotificationService.sendFriendRequestNotification(
         toUid: widget.uid,
         fromName: senderName,
         fromUid: currentUid,
       );
-
       if (mounted) {
         setState(() => _requestSent = true);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -535,12 +489,11 @@ class _AlumniPublicProfileScreenState
         );
       }
     } catch (e) {
+      debugPrint('Send request error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red));
       }
     } finally {
       if (mounted) setState(() => _isFriendLoading = false);
@@ -555,15 +508,12 @@ class _AlumniPublicProfileScreenState
           .collection('friend_requests')
           .doc('${currentUid}_${widget.uid}')
           .delete();
-
       if (mounted) setState(() => _requestSent = false);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red));
       }
     } finally {
       if (mounted) setState(() => _isFriendLoading = false);
@@ -571,130 +521,119 @@ class _AlumniPublicProfileScreenState
   }
 
   // ─── Accept incoming request ───
-Future<void> _acceptFriendRequest() async {
-  setState(() => _isFriendLoading = true);
-  try {
-    // Try both possible document ID formats
-    final docId1 = '${widget.uid}_$currentUid';
-    final docId2 = '${currentUid}_${widget.uid}';
+  Future<void> _acceptFriendRequest() async {
+    setState(() => _isFriendLoading = true);
+    try {
+      debugPrint('Accepting from profile: widget.uid=${widget.uid} currentUid=$currentUid');
 
-    DocumentSnapshot? requestDoc;
+      // ─── Try both doc ID formats ───
+      final docId1 = '${widget.uid}_$currentUid';
+      final docId2 = '${currentUid}_${widget.uid}';
+      DocumentSnapshot? requestDoc;
 
-    final doc1 = await FirebaseFirestore.instance
-        .collection('friend_requests')
-        .doc(docId1)
-        .get();
-
-    if (doc1.exists) {
-      requestDoc = doc1;
-      debugPrint('Found request at: $docId1');
-    } else {
-      final doc2 = await FirebaseFirestore.instance
+      final doc1 = await FirebaseFirestore.instance
           .collection('friend_requests')
-          .doc(docId2)
+          .doc(docId1)
           .get();
-      if (doc2.exists) {
-        requestDoc = doc2;
-        debugPrint('Found request at: $docId2');
+      if (doc1.exists) {
+        requestDoc = doc1;
+        debugPrint('Found at: $docId1');
+      } else {
+        final doc2 = await FirebaseFirestore.instance
+            .collection('friend_requests')
+            .doc(docId2)
+            .get();
+        if (doc2.exists) {
+          requestDoc = doc2;
+          debugPrint('Found at: $docId2');
+        }
       }
-    }
 
-    if (requestDoc == null) {
-      debugPrint('No request found at either ID');
+      if (requestDoc == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Friend request not found'),
+                backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
+
+      final requestDocId = requestDoc.id;
+      final now = FieldValue.serverTimestamp();
+
+      // ─── Step 1: Add my connection ───
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUid)
+          .collection('connections')
+          .doc(widget.uid)
+          .set({'connectedAt': now});
+
+      // ─── Step 2: Add their connection ───
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.uid)
+          .collection('connections')
+          .doc(currentUid)
+          .set({'connectedAt': now});
+
+      // ─── Step 3: Delete the request ───
+      await FirebaseFirestore.instance
+          .collection('friend_requests')
+          .doc(requestDocId)
+          .delete();
+
+      // ─── Step 4: Update my count ───
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUid)
+          .set({'connectionsCount': FieldValue.increment(1)},
+              SetOptions(merge: true));
+
+      // ─── Step 5: Update their count ───
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.uid)
+          .set({'connectionsCount': FieldValue.increment(1)},
+              SetOptions(merge: true));
+
+      // ─── Step 6: Notify sender ───
+      final myDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUid)
+          .get();
+      final acceptorName =
+          myDoc.data()?['name']?.toString() ?? 'Someone';
+      await NotificationService.sendFriendAcceptedNotification(
+        toUid: widget.uid,
+        acceptorName: acceptorName,
+        acceptorUid: currentUid,
+      );
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Friend request not found'),
-              backgroundColor: Colors.red),
-        );
-      }
-      setState(() => _isFriendLoading = false);
-      return;
-    }
-
-    final requestDocId = requestDoc.id;
-    debugPrint('Using requestDocId: $requestDocId');
-
-    final batch = FirebaseFirestore.instance.batch();
-    final now = FieldValue.serverTimestamp();
-
-    batch.set(
-        FirebaseFirestore.instance
-            .collection('users')
-            .doc(currentUid)
-            .collection('connections')
-            .doc(widget.uid),
-        {'connectedAt': now});
-
-    batch.set(
-        FirebaseFirestore.instance
-            .collection('users')
-            .doc(widget.uid)
-            .collection('connections')
-            .doc(currentUid),
-        {'connectedAt': now});
-
-    batch.delete(FirebaseFirestore.instance
-        .collection('friend_requests')
-        .doc(requestDocId));
-
-    batch.set(
-        FirebaseFirestore.instance
-            .collection('users')
-            .doc(currentUid),
-        {'connectionsCount': FieldValue.increment(1)},
-        SetOptions(merge: true));
-
-    batch.set(
-        FirebaseFirestore.instance
-            .collection('users')
-            .doc(widget.uid),
-        {'connectionsCount': FieldValue.increment(1)},
-        SetOptions(merge: true));
-
-    await batch.commit();
-
-    final myDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(currentUid)
-        .get();
-    final acceptorName =
-        myDoc.data()?['name']?.toString() ?? 'Someone';
-
-    await NotificationService.sendFriendAcceptedNotification(
-      toUid: widget.uid,
-      acceptorName: acceptorName,
-      acceptorUid: currentUid,
-    );
-
-    if (mounted) {
-      setState(() {
-        _isFriend = true;
-        _requestReceived = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        setState(() {
+          _isFriend = true;
+          _requestReceived = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content:
               Text('You are now connected with ${_safe('name')}!'),
           backgroundColor: Colors.green,
-        ),
-      );
-    }
-  } catch (e) {
-    debugPrint('Accept error: $e');
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        ));
+      }
+    } catch (e) {
+      debugPrint('Accept error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text('Error: $e'),
-            backgroundColor: Colors.red),
-      );
+            backgroundColor: Colors.red));
+      }
+    } finally {
+      if (mounted) setState(() => _isFriendLoading = false);
     }
-  } finally {
-    if (mounted) setState(() => _isFriendLoading = false);
   }
-  debugPrint('Current user: ${FirebaseAuth.instance.currentUser?.uid}');
-debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
-}
 
   // ─── Unfriend ───
   Future<void> _unfriend() async {
@@ -703,8 +642,7 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
       builder: (_) => AlertDialog(
         title: Text('Unfriend',
             style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
-        content: Text(
-            'Remove ${_safe('name')} from your connections?',
+        content: Text('Remove ${_safe('name')} from your connections?',
             style: GoogleFonts.inter()),
         actions: [
           TextButton(
@@ -722,40 +660,34 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
         ],
       ),
     );
-
     if (confirm != true) return;
-
     setState(() => _isFriendLoading = true);
     try {
-      final batch = FirebaseFirestore.instance.batch();
-
-      batch.delete(FirebaseFirestore.instance
+      await FirebaseFirestore.instance
           .collection('users')
           .doc(currentUid)
           .collection('connections')
-          .doc(widget.uid));
+          .doc(widget.uid)
+          .delete();
 
-      batch.delete(FirebaseFirestore.instance
+      await FirebaseFirestore.instance
           .collection('users')
           .doc(widget.uid)
           .collection('connections')
-          .doc(currentUid));
+          .doc(currentUid)
+          .delete();
 
-      batch.set(
-          FirebaseFirestore.instance
-              .collection('users')
-              .doc(currentUid),
-          {'connectionsCount': FieldValue.increment(-1)},
-          SetOptions(merge: true));
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUid)
+          .set({'connectionsCount': FieldValue.increment(-1)},
+              SetOptions(merge: true));
 
-      batch.set(
-          FirebaseFirestore.instance
-              .collection('users')
-              .doc(widget.uid),
-          {'connectionsCount': FieldValue.increment(-1)},
-          SetOptions(merge: true));
-
-      await batch.commit();
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.uid)
+          .set({'connectionsCount': FieldValue.increment(-1)},
+              SetOptions(merge: true));
 
       if (mounted) {
         setState(() => _isFriend = false);
@@ -767,11 +699,9 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red));
       }
     } finally {
       if (mounted) setState(() => _isFriendLoading = false);
@@ -784,12 +714,10 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
     try {
       final name = _safe('name');
       final avatarUrl = _safe('profilePictureUrl', fallback: '');
-
       final existing = await FirebaseFirestore.instance
           .collection('chats')
           .where('memberIds', arrayContains: currentUid)
           .get();
-
       String? chatId;
       for (final doc in existing.docs) {
         final members =
@@ -799,7 +727,6 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
           break;
         }
       }
-
       chatId ??= (await FirebaseFirestore.instance
               .collection('chats')
               .add({
@@ -810,7 +737,6 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
         'createdAt': FieldValue.serverTimestamp(),
       }))
           .id;
-
       if (mounted) {
         Navigator.push(
           context,
@@ -826,11 +752,9 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Could not open chat: $e'),
-              backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not open chat: $e'),
+            backgroundColor: Colors.red));
       }
     } finally {
       if (mounted) setState(() => isChatLoading = false);
@@ -872,13 +796,9 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
     return (val != null && val.isNotEmpty) ? val : fallback;
   }
 
-  // ─── Friend button — only shown between alumni ───
+  // ─── Friend button ───
   Widget _buildFriendButton() {
-    // Hide entirely if either party is not alumni
-    if (!_isAlumni || !_targetIsAlumni) {
-      return const SizedBox.shrink();
-    }
-
+    if (!_isAlumni || !_targetIsAlumni) return const SizedBox.shrink();
     if (_isFriendLoading) {
       return const SizedBox(
         height: 44,
@@ -892,7 +812,6 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
         ),
       );
     }
-
     if (_isFriend) {
       return OutlinedButton.icon(
         onPressed: _unfriend,
@@ -907,11 +826,10 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
         ),
       );
     }
-
     if (_requestSent) {
       return OutlinedButton.icon(
         onPressed: _cancelFriendRequest,
-        icon: const Icon(Icons.hourglass_top_outlined, size: 16),
+        icon: const Icon(Icons.hourglass_top, size: 16),
         label: const Text('Request Sent · Cancel'),
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.mutedText,
@@ -922,13 +840,11 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
         ),
       );
     }
-
     if (_requestReceived) {
       return ElevatedButton.icon(
         onPressed: _acceptFriendRequest,
         icon: const Icon(Icons.person_add, size: 16),
-        label: Text(
-            'Accept ${_safe('name').split(' ').first}\'s Request'),
+        label: Text("Accept ${_safe('name').split(' ').first}'s Request"),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.green,
           foregroundColor: Colors.white,
@@ -938,7 +854,6 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
         ),
       );
     }
-
     return ElevatedButton.icon(
       onPressed: _sendFriendRequest,
       icon: const Icon(Icons.person_add_outlined, size: 16),
@@ -965,11 +880,10 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
                 color: AppColors.brandRed)),
       );
     }
-
     if (userData == null) {
       return Scaffold(
-        appBar: AppBar(
-            backgroundColor: AppColors.cardWhite, elevation: 0),
+        appBar:
+            AppBar(backgroundColor: AppColors.cardWhite, elevation: 0),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1000,18 +914,14 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
       backgroundColor: AppColors.softWhite,
       body: CustomScrollView(
         slivers: [
-          // ─── AppBar ───
           SliverAppBar(
             pinned: true,
             backgroundColor: AppColors.cardWhite,
             elevation: 0,
-            title: Text(
-              _safe('name'),
-              style: GoogleFonts.cormorantGaramond(fontSize: 22),
-            ),
+            title: Text(_safe('name'),
+                style: GoogleFonts.cormorantGaramond(fontSize: 22)),
           ),
 
-          // ─── Cover + Avatar ───
           SliverToBoxAdapter(
             child: Stack(
               clipBehavior: Clip.none,
@@ -1025,8 +935,7 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
                           fit: BoxFit.cover,
                           placeholder: (_, __) =>
                               Container(color: AppColors.softWhite),
-                          errorWidget: (_, __, ___) =>
-                              _defaultCover(),
+                          errorWidget: (_, __, ___) => _defaultCover(),
                         )
                       : _defaultCover(),
                 ),
@@ -1072,42 +981,34 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
 
           const SliverToBoxAdapter(child: SizedBox(height: 62)),
 
-          // ─── Name, headline, stats, action buttons ───
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    _safe('name'),
-                    style: GoogleFonts.cormorantGaramond(
-                        fontSize: 28, fontWeight: FontWeight.w600),
-                  ),
+                  Text(_safe('name'),
+                      style: GoogleFonts.cormorantGaramond(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w600)),
                   if (_safe('headline') != '—') ...[
                     const SizedBox(height: 2),
-                    Text(
-                      _safe('headline', fallback: _safe('role')),
-                      style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500),
-                    ),
+                    Text(_safe('headline', fallback: _safe('role')),
+                        style: GoogleFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500)),
                   ],
                   if (_safe('location') != '—') ...[
                     const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(Icons.location_on_outlined,
-                            size: 14, color: AppColors.mutedText),
-                        const SizedBox(width: 4),
-                        Text(
-                          _safe('location'),
+                    Row(children: [
+                      Icon(Icons.location_on_outlined,
+                          size: 14, color: AppColors.mutedText),
+                      const SizedBox(width: 4),
+                      Text(_safe('location'),
                           style: GoogleFonts.inter(
                               fontSize: 13,
-                              color: AppColors.mutedText),
-                        ),
-                      ],
-                    ),
+                              color: AppColors.mutedText)),
+                    ]),
                   ],
                   const SizedBox(height: 6),
                   Text(
@@ -1117,112 +1018,92 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
                   ),
                   const SizedBox(height: 16),
 
-                  // ─── Message + Follow row ───
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed:
-                              isChatLoading ? null : _startChat,
-                          icon: isChatLoading
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white),
-                                )
-                              : const Icon(
-                                  Icons.chat_bubble_outline,
-                                  size: 16),
-                          label: Text(isChatLoading
-                              ? 'Opening...'
-                              : 'Message'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.brandRed,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 10),
-                            shape: RoundedRectangleBorder(
-                                borderRadius:
-                                    BorderRadius.circular(8)),
-                          ),
+                  // ─── Message + Follow ───
+                  Row(children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: isChatLoading ? null : _startChat,
+                        icon: isChatLoading
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white))
+                            : const Icon(Icons.chat_bubble_outline,
+                                size: 16),
+                        label: Text(
+                            isChatLoading ? 'Opening...' : 'Message'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.brandRed,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 10),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
                         ),
                       ),
-                      // ─── Only show Follow if allowed ───
-                      if (_canFollow) ...[
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: isFollowLoading
-                              ? const Center(
-                                  child: SizedBox(
+                    ),
+                    if (_canFollow) ...[
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: isFollowLoading
+                            ? const Center(
+                                child: SizedBox(
                                     width: 24,
                                     height: 24,
                                     child: CircularProgressIndicator(
                                         strokeWidth: 2.5,
-                                        color: AppColors.brandRed),
-                                  ),
-                                )
-                              : OutlinedButton.icon(
-                                  onPressed: _toggleFollow,
-                                  icon: Icon(
+                                        color: AppColors.brandRed)))
+                            : OutlinedButton.icon(
+                                onPressed: _toggleFollow,
+                                icon: Icon(
                                     isFollowing
                                         ? Icons.person_remove_outlined
                                         : Icons.person_add_outlined,
-                                    size: 16,
-                                  ),
-                                  label: Text(isFollowing
-                                      ? 'Unfollow'
-                                      : 'Follow'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: isFollowing
-                                        ? AppColors.mutedText
-                                        : AppColors.brandRed,
-                                    side: BorderSide(
+                                    size: 16),
+                                label: Text(isFollowing
+                                    ? 'Unfollow'
+                                    : 'Follow'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: isFollowing
+                                      ? AppColors.mutedText
+                                      : AppColors.brandRed,
+                                  side: BorderSide(
                                       color: isFollowing
                                           ? AppColors.mutedText
-                                          : AppColors.brandRed,
-                                    ),
-                                    padding:
-                                        const EdgeInsets.symmetric(
-                                            vertical: 10),
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(
-                                                8)),
-                                  ),
+                                          : AppColors.brandRed),
+                                  padding:
+                                      const EdgeInsets.symmetric(
+                                          vertical: 10),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius.circular(8)),
                                 ),
-                        ),
-                      ],
+                              ),
+                      ),
                     ],
-                  ),
+                  ]),
                   const SizedBox(height: 10),
-
-                  // ─── Friend button (alumni only) ───
                   _buildFriendButton(),
-
                   const SizedBox(height: 24),
                 ],
               ),
             ),
           ),
 
-          // ─── About ───
           if (_safe('about') != '—') ...[
             SliverToBoxAdapter(
               child: _sectionCard(
                 title: 'About',
-                child: Text(
-                  _safe('about'),
-                  style: GoogleFonts.inter(
-                      fontSize: 14, height: 1.6),
-                ),
+                child: Text(_safe('about'),
+                    style:
+                        GoogleFonts.inter(fontSize: 14, height: 1.6)),
               ),
             ),
             const SliverToBoxAdapter(child: SizedBox(height: 12)),
           ],
 
-          // ─── Experience ───
           SliverToBoxAdapter(
             child: _sectionCard(
               title: 'Experience',
@@ -1245,8 +1126,7 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
                                   borderRadius:
                                       BorderRadius.circular(8),
                                 ),
-                                child: const Icon(
-                                    Icons.work_outline,
+                                child: const Icon(Icons.work_outline,
                                     color: AppColors.brandRed,
                                     size: 20),
                               ),
@@ -1256,66 +1136,48 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
                                   crossAxisAlignment:
                                       CrossAxisAlignment.start,
                                   children: [
+                                    Text(_safeMap(exp, 'title'),
+                                        style: GoogleFonts.inter(
+                                            fontSize: 14,
+                                            fontWeight:
+                                                FontWeight.w700)),
+                                    Text(_safeMap(exp, 'company'),
+                                        style: GoogleFonts.inter(
+                                            fontSize: 13,
+                                            color: AppColors.brandRed,
+                                            fontWeight:
+                                                FontWeight.w600)),
                                     Text(
-                                      _safeMap(exp, 'title'),
-                                      style: GoogleFonts.inter(
-                                          fontSize: 14,
-                                          fontWeight:
-                                              FontWeight.w700),
-                                    ),
-                                    Text(
-                                      _safeMap(exp, 'company'),
-                                      style: GoogleFonts.inter(
-                                          fontSize: 13,
-                                          color:
-                                              AppColors.brandRed,
-                                          fontWeight:
-                                              FontWeight.w600),
-                                    ),
-                                    Text(
-                                      _formatPeriod(exp['start'],
-                                          exp['end']),
-                                      style: GoogleFonts.inter(
-                                          fontSize: 12,
-                                          color:
-                                              AppColors.mutedText),
-                                    ),
-                                    if (_safeMap(
-                                            exp, 'location') !=
+                                        _formatPeriod(
+                                            exp['start'], exp['end']),
+                                        style: GoogleFonts.inter(
+                                            fontSize: 12,
+                                            color:
+                                                AppColors.mutedText)),
+                                    if (_safeMap(exp, 'location') !=
                                         '—') ...[
                                       const SizedBox(height: 2),
-                                      Row(
-                                        children: [
-                                          Icon(
-                                              Icons
-                                                  .location_on_outlined,
-                                              size: 12,
-                                              color: AppColors
-                                                  .mutedText),
-                                          const SizedBox(width: 3),
-                                          Text(
-                                            _safeMap(
-                                                exp, 'location'),
-                                            style:
-                                                GoogleFonts.inter(
-                                                    fontSize: 12,
-                                                    color: AppColors
-                                                        .mutedText),
-                                          ),
-                                        ],
-                                      ),
+                                      Row(children: [
+                                        Icon(
+                                            Icons.location_on_outlined,
+                                            size: 12,
+                                            color: AppColors.mutedText),
+                                        const SizedBox(width: 3),
+                                        Text(_safeMap(exp, 'location'),
+                                            style: GoogleFonts.inter(
+                                                fontSize: 12,
+                                                color: AppColors
+                                                    .mutedText)),
+                                      ]),
                                     ],
-                                    if (_safeMap(exp,
-                                            'description') !=
+                                    if (_safeMap(exp, 'description') !=
                                         '—') ...[
                                       const SizedBox(height: 6),
                                       Text(
-                                        _safeMap(
-                                            exp, 'description'),
-                                        style: GoogleFonts.inter(
-                                            fontSize: 13,
-                                            height: 1.5),
-                                      ),
+                                          _safeMap(exp, 'description'),
+                                          style: GoogleFonts.inter(
+                                              fontSize: 13,
+                                              height: 1.5)),
                                     ],
                                   ],
                                 ),
@@ -1334,7 +1196,6 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
 
           const SliverToBoxAdapter(child: SizedBox(height: 12)),
 
-          // ─── Education ───
           SliverToBoxAdapter(
             child: _sectionCard(
               title: 'Education',
@@ -1368,65 +1229,53 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
                                   crossAxisAlignment:
                                       CrossAxisAlignment.start,
                                   children: [
+                                    Text(_safeMap(edu, 'degree'),
+                                        style: GoogleFonts.inter(
+                                            fontSize: 14,
+                                            fontWeight:
+                                                FontWeight.w700)),
+                                    Text(_safeMap(edu, 'school'),
+                                        style: GoogleFonts.inter(
+                                            fontSize: 13,
+                                            color: AppColors.brandRed,
+                                            fontWeight:
+                                                FontWeight.w600)),
                                     Text(
-                                      _safeMap(edu, 'degree'),
-                                      style: GoogleFonts.inter(
-                                          fontSize: 14,
-                                          fontWeight:
-                                              FontWeight.w700),
-                                    ),
-                                    Text(
-                                      _safeMap(edu, 'school'),
-                                      style: GoogleFonts.inter(
-                                          fontSize: 13,
-                                          color:
-                                              AppColors.brandRed,
-                                          fontWeight:
-                                              FontWeight.w600),
-                                    ),
-                                    Text(
-                                      _formatPeriod(edu['start'],
-                                          edu['end']),
-                                      style: GoogleFonts.inter(
-                                          fontSize: 12,
-                                          color:
-                                              AppColors.mutedText),
-                                    ),
-                                    if (_safeMap(edu,
-                                            'fieldOfStudy') !=
+                                        _formatPeriod(
+                                            edu['start'], edu['end']),
+                                        style: GoogleFonts.inter(
+                                            fontSize: 12,
+                                            color:
+                                                AppColors.mutedText)),
+                                    if (_safeMap(
+                                            edu, 'fieldOfStudy') !=
                                         '—') ...[
                                       const SizedBox(height: 2),
                                       Text(
-                                        _safeMap(
-                                            edu, 'fieldOfStudy'),
-                                        style: GoogleFonts.inter(
-                                            fontSize: 12,
-                                            color: AppColors
-                                                .mutedText),
-                                      ),
+                                          _safeMap(
+                                              edu, 'fieldOfStudy'),
+                                          style: GoogleFonts.inter(
+                                              fontSize: 12,
+                                              color:
+                                                  AppColors.mutedText)),
                                     ],
                                     if (_safeMap(edu, 'grade') !=
                                         '—') ...[
                                       const SizedBox(height: 2),
-                                      Row(
-                                        children: [
-                                          Icon(
-                                              Icons
-                                                  .military_tech_outlined,
-                                              size: 12,
-                                              color: AppColors
-                                                  .mutedText),
-                                          const SizedBox(width: 3),
-                                          Text(
+                                      Row(children: [
+                                        Icon(
+                                            Icons
+                                                .military_tech_outlined,
+                                            size: 12,
+                                            color: AppColors.mutedText),
+                                        const SizedBox(width: 3),
+                                        Text(
                                             'Grade: ${_safeMap(edu, 'grade')}',
-                                            style:
-                                                GoogleFonts.inter(
-                                                    fontSize: 12,
-                                                    color: AppColors
-                                                        .mutedText),
-                                          ),
-                                        ],
-                                      ),
+                                            style: GoogleFonts.inter(
+                                                fontSize: 12,
+                                                color: AppColors
+                                                    .mutedText)),
+                                      ]),
                                     ],
                                   ],
                                 ),
@@ -1476,13 +1325,11 @@ debugPrint('Is authenticated: ${FirebaseAuth.instance.currentUser != null}');
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: GoogleFonts.cormorantGaramond(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.darkText),
-            ),
+            Text(title,
+                style: GoogleFonts.cormorantGaramond(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.darkText)),
             const SizedBox(height: 12),
             child,
           ],

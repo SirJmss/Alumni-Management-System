@@ -9,11 +9,14 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import 'package:alumni/core/constants/app_colors.dart';
+
 class EditEventScreen extends StatefulWidget {
   final String eventId;
   final Map<String, dynamic> event;
 
-  const EditEventScreen({super.key, required this.eventId, required this.event});
+  const EditEventScreen(
+      {super.key, required this.eventId, required this.event});
 
   @override
   State<EditEventScreen> createState() => _EditEventScreenState();
@@ -23,19 +26,18 @@ class _EditEventScreenState extends State<EditEventScreen> {
   late TextEditingController _titleController;
   late TextEditingController _descriptionController;
   late TextEditingController _locationController;
+  late TextEditingController _typeController;
 
   DateTime? _startDateTime;
   DateTime? _endDateTime;
 
-  File? _newImageFile;               // new image selected locally
-  String? _currentImageUrl;          // existing URL from Firestore
-  bool _removeImage = false;         // flag if user wants to remove existing image
+  File? _newImageFile;
+  String? _currentImageUrl;
+  bool _removeImage = false;
   bool _isLoading = false;
-
-  final backgroundCream = const Color(0xFFFAF7F2);
-  final textDark = const Color(0xFF1A1C35);
-  final textSecondary = const Color(0xFF5F6368);
-  final primaryRed = const Color(0xFFB22222);
+  bool _isUploading = false;
+  bool _isVirtual = false;
+  bool _isImportant = false;
 
   final ImagePicker _picker = ImagePicker();
   final _formKey = GlobalKey<FormState>();
@@ -43,10 +45,14 @@ class _EditEventScreenState extends State<EditEventScreen> {
   @override
   void initState() {
     super.initState();
-
-    _titleController = TextEditingController(text: widget.event['title'] ?? '');
-    _descriptionController = TextEditingController(text: widget.event['description'] ?? '');
-    _locationController = TextEditingController(text: widget.event['location'] ?? '');
+    _titleController = TextEditingController(
+        text: widget.event['title'] ?? '');
+    _descriptionController = TextEditingController(
+        text: widget.event['description'] ?? '');
+    _locationController = TextEditingController(
+        text: widget.event['location'] ?? '');
+    _typeController = TextEditingController(
+        text: widget.event['type'] ?? '');
 
     final startTs = widget.event['startDate'] as Timestamp?;
     if (startTs != null) _startDateTime = startTs.toDate();
@@ -54,77 +60,149 @@ class _EditEventScreenState extends State<EditEventScreen> {
     final endTs = widget.event['endDate'] as Timestamp?;
     if (endTs != null) _endDateTime = endTs.toDate();
 
-    _currentImageUrl = widget.event['heroImageUrl'] as String?;
+    _currentImageUrl =
+        widget.event['heroImageUrl'] as String?;
+    _isVirtual = widget.event['isVirtual'] as bool? ?? false;
+    _isImportant =
+        widget.event['isImportant'] as bool? ?? false;
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    _locationController.dispose();
+    _typeController.dispose();
+    super.dispose();
   }
 
   Future<void> _pickImage() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: AppColors.borderSubtle,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Text('Select Image Source',
+                style: GoogleFonts.cormorantGaramond(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined,
+                  color: AppColors.brandRed),
+              title: Text('Gallery',
+                  style: GoogleFonts.inter()),
+              onTap: () =>
+                  Navigator.pop(context, ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined,
+                  color: AppColors.brandRed),
+              title: Text('Camera',
+                  style: GoogleFonts.inter()),
+              onTap: () =>
+                  Navigator.pop(context, ImageSource.camera),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null) return;
+
     final XFile? pickedFile = await _picker.pickImage(
-      source: ImageSource.gallery,
+      source: source,
       imageQuality: 85,
-      maxWidth: 1024,
-      maxHeight: 1024,
+      maxWidth: 1200,
+      maxHeight: 800,
     );
 
     if (pickedFile != null && mounted) {
       setState(() {
         _newImageFile = File(pickedFile.path);
-        _removeImage = false; // reset remove flag if new image is picked
+        _removeImage = false;
       });
     }
   }
 
   Future<String?> _uploadImage(File imageFile) async {
     try {
-      final userId = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
-      final fileName = 'event_images/$userId/edit_${widget.eventId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-      final ref = FirebaseStorage.instance.ref().child(fileName);
-      final uploadTask = ref.putFile(imageFile);
-
-      final snapshot = await uploadTask.whenComplete(() {});
-      final downloadUrl = await snapshot.ref.getDownloadURL();
-
-      return downloadUrl;
+      setState(() => _isUploading = true);
+      final userId =
+          FirebaseAuth.instance.currentUser?.uid ?? 'unknown';
+      final fileName =
+          'event_images/$userId/edit_${widget.eventId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final ref =
+          FirebaseStorage.instance.ref().child(fileName);
+      await ref.putFile(imageFile);
+      return await ref.getDownloadURL();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Image upload failed: $e'), backgroundColor: primaryRed),
-        );
+        _showSnackBar('Image upload failed: $e', isError: true);
       }
       return null;
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
     }
   }
 
   Future<void> _pickDateTime(bool isStart) async {
-    final DateTime? pickedDate = await showDatePicker(
+    final initial = isStart
+        ? (_startDateTime ?? DateTime.now())
+        : (_endDateTime ?? _startDateTime ?? DateTime.now());
+
+    final pickedDate = await showDatePicker(
       context: context,
-      initialDate: isStart ? (_startDateTime ?? DateTime.now()) : (_endDateTime ?? DateTime.now()),
+      initialDate: initial,
       firstDate: DateTime(2000),
       lastDate: DateTime(2035),
       builder: (context, child) => Theme(
         data: ThemeData.light().copyWith(
-          colorScheme: ColorScheme.light(primary: primaryRed),
-          textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(foregroundColor: primaryRed)),
+          colorScheme: const ColorScheme.light(
+              primary: AppColors.brandRed),
+          textButtonTheme: TextButtonThemeData(
+            style: TextButton.styleFrom(
+                foregroundColor: AppColors.brandRed),
+          ),
         ),
         child: child!,
       ),
     );
+    if (pickedDate == null || !mounted) return;
 
-    if (pickedDate == null) return;
-
-    final TimeOfDay? pickedTime = await showTimePicker(
+    final pickedTime = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(isStart ? (_startDateTime ?? DateTime.now()) : (_endDateTime ?? DateTime.now())),
+      initialTime: TimeOfDay.fromDateTime(initial),
       builder: (context, child) => Theme(
         data: ThemeData.light().copyWith(
-          colorScheme: ColorScheme.light(primary: primaryRed),
-          textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(foregroundColor: primaryRed)),
+          colorScheme: const ColorScheme.light(
+              primary: AppColors.brandRed),
+          textButtonTheme: TextButtonThemeData(
+            style: TextButton.styleFrom(
+                foregroundColor: AppColors.brandRed),
+          ),
         ),
         child: child!,
       ),
     );
-
-    if (pickedTime == null) return;
+    if (pickedTime == null || !mounted) return;
 
     final combined = DateTime(
       pickedDate.year,
@@ -135,21 +213,33 @@ class _EditEventScreenState extends State<EditEventScreen> {
     );
 
     setState(() {
-      if (isStart) _startDateTime = combined;
-      else _endDateTime = combined;
+      if (isStart) {
+        _startDateTime = combined;
+        if (_endDateTime != null &&
+            _endDateTime!.isBefore(combined)) {
+          _endDateTime = null;
+        }
+      } else {
+        _endDateTime = combined;
+      }
     });
   }
 
   String _formatDateTime(DateTime? dt) {
-    return dt != null ? DateFormat('MMM dd, yyyy • hh:mm a').format(dt) : 'Not set';
+    if (dt == null) return 'Tap to set';
+    return DateFormat('EEE, MMM dd yyyy • hh:mm a').format(dt);
   }
 
   Future<void> _updateEvent() async {
     if (!_formKey.currentState!.validate()) return;
     if (_startDateTime == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: const Text('Start date & time required'), backgroundColor: primaryRed),
-      );
+      _showSnackBar('Start date & time is required',
+          isError: true);
+      return;
+    }
+    if (_endDateTime != null &&
+        _endDateTime!.isBefore(_startDateTime!)) {
+      _showSnackBar('End cannot be before start', isError: true);
       return;
     }
 
@@ -157,258 +247,465 @@ class _EditEventScreenState extends State<EditEventScreen> {
 
     try {
       String? newImageUrl;
-
-      // Handle image update logic
       if (_removeImage) {
-        newImageUrl = null; // remove image
+        newImageUrl = null;
       } else if (_newImageFile != null) {
         newImageUrl = await _uploadImage(_newImageFile!);
-        if (newImageUrl == null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: const Text('Image upload failed — keeping previous image'), backgroundColor: primaryRed),
-          );
-        }
+        newImageUrl ??= _currentImageUrl;
       } else {
-        newImageUrl = _currentImageUrl; // keep existing
+        newImageUrl = _currentImageUrl;
       }
 
-      final updates = {
+      await FirebaseFirestore.instance
+          .collection('events')
+          .doc(widget.eventId)
+          .update({
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
         'location': _locationController.text.trim(),
+        'type': _typeController.text.trim().isEmpty
+            ? 'Campus Event'
+            : _typeController.text.trim(),
         'startDate': Timestamp.fromDate(_startDateTime!),
-        'updatedAt': FieldValue.serverTimestamp(),
+        'endDate': _endDateTime != null
+            ? Timestamp.fromDate(_endDateTime!)
+            : null,
         'heroImageUrl': newImageUrl,
-      };
-
-      if (_endDateTime != null) {
-        updates['endDate'] = Timestamp.fromDate(_endDateTime!);
-      }
-
-      await FirebaseFirestore.instance.collection('events').doc(widget.eventId).update(updates);
+        'isVirtual': _isVirtual,
+        'isImportant': _isImportant,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Event updated successfully'), backgroundColor: Colors.green),
-        );
+        _showSnackBar('Event updated successfully!',
+            isError: false);
         Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: primaryRed),
-        );
+        _showSnackBar('Error: $e', isError: true);
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  void _showSnackBar(String message, {required bool isError}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: GoogleFonts.inter()),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(12),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: backgroundCream,
+      backgroundColor: AppColors.softWhite,
       appBar: AppBar(
-        title: Text(
-          'Edit Event',
-          style: GoogleFonts.playfairDisplay(fontSize: 26, color: Colors.white),
-        ),
-        backgroundColor: primaryRed,
-        foregroundColor: Colors.white,
+        backgroundColor: AppColors.cardWhite,
         elevation: 0,
+        iconTheme:
+            const IconThemeData(color: AppColors.darkText),
+        title: Text('Edit Event',
+            style: GoogleFonts.cormorantGaramond(fontSize: 22)),
         centerTitle: true,
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 32, 24, 40),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Update Event Details',
-                  style: GoogleFonts.playfairDisplay(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                    color: textDark,
-                  ),
-                ),
-                const SizedBox(height: 28),
-
-                _buildTextField(_titleController, 'Event Title', 'Update the event name'),
-                const SizedBox(height: 24),
-
-                _buildTextField(_descriptionController, 'Description', 'Revise the description', maxLines: 6),
-                const SizedBox(height: 24),
-
-                _buildTextField(_locationController, 'Location', 'Update venue or link'),
-                const SizedBox(height: 32),
-
-                // Image section
-                Text(
-                  'Event Image',
-                  style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: textDark),
-                ),
-                const SizedBox(height: 12),
-
-                GestureDetector(
-                  onTap: _pickImage,
-                  child: Container(
-                    height: 160,
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: _newImageFile != null
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(14),
-                            child: Image.file(_newImageFile!, fit: BoxFit.cover),
-                          )
-                        : _currentImageUrl != null && !_removeImage
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(14),
-                                child: CachedNetworkImage(
-                                  imageUrl: _currentImageUrl!,
-                                  fit: BoxFit.cover,
-                                  placeholder: (context, url) => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                                  errorWidget: (context, url, error) => const Icon(Icons.broken_image, color: Colors.grey),
-                                ),
-                              )
-                            : const Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.add_photo_alternate_outlined, size: 48, color: Colors.grey),
-                                  SizedBox(height: 12),
-                                  Text('Tap to change / upload image', style: TextStyle(color: Colors.grey)),
-                                ],
-                              ),
-                  ),
-                ),
-
-                if (_currentImageUrl != null && !_removeImage && _newImageFile == null) ...[
-                  const SizedBox(height: 12),
-                  TextButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        _removeImage = true;
-                        _newImageFile = null;
-                      });
-                    },
-                    icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-                    label: const Text('Remove current image', style: TextStyle(color: Colors.redAccent)),
-                  ),
-                ],
-
-                const SizedBox(height: 32),
-
-                _buildDateTimeSelector('Start Date & Time', _startDateTime, true),
-                const Divider(height: 48, thickness: 1, color: Color.fromARGB(255, 238, 238, 238)),
-                _buildDateTimeSelector('End Date & Time (optional)', _endDateTime, false),
-
-                const SizedBox(height: 48),
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton.icon(
-                    onPressed: _isLoading ? null : _updateEvent,
-                    icon: _isLoading
-                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-                        : const Icon(Icons.save_outlined, size: 24),
-                    label: Text(
-                      _isLoading ? 'Updating...' : 'Save Changes',
-                      style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w600),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryRed,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      elevation: 1,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTextField(TextEditingController controller, String label, String hint, {int maxLines = 1}) {
-    return TextFormField(
-      controller: controller,
-      maxLines: maxLines,
-      style: GoogleFonts.inter(color: textDark),
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        labelStyle: GoogleFonts.inter(color: primaryRed, fontWeight: FontWeight.w500),
-        hintStyle: GoogleFonts.inter(color: textSecondary.withOpacity(0.7)),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: primaryRed, width: 2),
-        ),
-        filled: true,
-        fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      ),
-      validator: (value) => value?.trim().isEmpty ?? true ? 'Required field' : null,
-    );
-  }
-
-  Widget _buildDateTimeSelector(String label, DateTime? value, bool isStart) {
-    return InkWell(
-      onTap: () => _pickDateTime(isStart),
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.grey.shade200),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: GoogleFonts.inter(fontSize: 14, color: textSecondary, fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _formatDateTime(value),
-                    style: GoogleFonts.inter(
-                      fontSize: 16,
-                      color: value == null ? textSecondary : textDark,
-                      fontWeight: value == null ? FontWeight.normal : FontWeight.w500,
-                    ),
-                  ),
-                ],
+        actions: [
+          TextButton(
+            onPressed: _isLoading ? null : _updateEvent,
+            child: Text(
+              _isLoading ? 'Saving...' : 'Save',
+              style: GoogleFonts.inter(
+                color: AppColors.brandRed,
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
               ),
             ),
-            Icon(Icons.edit_calendar_outlined, color: primaryRed, size: 24),
+          ),
+        ],
+      ),
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            // ─── Image ───
+            GestureDetector(
+              onTap: _pickImage,
+              child: Container(
+                height: 200,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: AppColors.cardWhite,
+                  borderRadius: BorderRadius.circular(16),
+                  border:
+                      Border.all(color: AppColors.borderSubtle),
+                ),
+                child: _newImageFile != null
+                    ? Stack(children: [
+                        ClipRRect(
+                          borderRadius:
+                              BorderRadius.circular(16),
+                          child: Image.file(_newImageFile!,
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                              height: 200),
+                        ),
+                        _removeButton(),
+                        if (_isUploading)
+                          const Center(
+                              child: CircularProgressIndicator(
+                                  color: Colors.white)),
+                      ])
+                    : (_currentImageUrl != null &&
+                            !_removeImage)
+                        ? Stack(children: [
+                            ClipRRect(
+                              borderRadius:
+                                  BorderRadius.circular(16),
+                              child: CachedNetworkImage(
+                                imageUrl: _currentImageUrl!,
+                                fit: BoxFit.cover,
+                                width: double.infinity,
+                                height: 200,
+                                placeholder: (_, __) =>
+                                    const Center(
+                                        child:
+                                            CircularProgressIndicator(
+                                                color: AppColors
+                                                    .brandRed)),
+                                errorWidget: (_, __, ___) =>
+                                    const Icon(
+                                        Icons.broken_image,
+                                        color:
+                                            AppColors.mutedText),
+                              ),
+                            ),
+                            _removeButton(),
+                          ])
+                        : Column(
+                            mainAxisAlignment:
+                                MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                  Icons
+                                      .add_photo_alternate_outlined,
+                                  size: 48,
+                                  color: AppColors.mutedText),
+                              const SizedBox(height: 8),
+                              Text('Tap to add event image',
+                                  style: GoogleFonts.inter(
+                                      color: AppColors.mutedText,
+                                      fontSize: 14)),
+                            ],
+                          ),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            _buildField(
+              controller: _titleController,
+              label: 'Event Title',
+              hint: 'What is this event called?',
+              validator: (v) => v?.trim().isEmpty == true
+                  ? 'Title is required'
+                  : null,
+            ),
+            const SizedBox(height: 16),
+
+            _buildField(
+              controller: _typeController,
+              label: 'Event Type',
+              hint: 'e.g. Campus Event, Webinar, Reunion',
+            ),
+            const SizedBox(height: 16),
+
+            _buildField(
+              controller: _descriptionController,
+              label: 'Description',
+              hint: 'Describe the event...',
+              maxLines: 5,
+              validator: (v) => v?.trim().isEmpty == true
+                  ? 'Description is required'
+                  : null,
+            ),
+            const SizedBox(height: 16),
+
+            _buildField(
+              controller: _locationController,
+              label: 'Location',
+              hint: 'Venue, address, or online link',
+              prefixIcon: Icons.location_on_outlined,
+            ),
+
+            const SizedBox(height: 20),
+
+            _buildToggleCard(
+              icon: Icons.videocam_outlined,
+              title: 'Virtual Event',
+              subtitle: 'This event will be held online',
+              value: _isVirtual,
+              onChanged: (v) => setState(() => _isVirtual = v),
+            ),
+            const SizedBox(height: 10),
+            _buildToggleCard(
+              icon: Icons.star_outline,
+              title: 'Mark as Important',
+              subtitle: 'Highlight this event for all alumni',
+              value: _isImportant,
+              onChanged: (v) =>
+                  setState(() => _isImportant = v),
+            ),
+
+            const SizedBox(height: 20),
+
+            Text('Schedule',
+                style: GoogleFonts.cormorantGaramond(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.darkText)),
+            const SizedBox(height: 12),
+
+            _buildDateTimeTile(
+              label: 'Start Date & Time',
+              value: _startDateTime,
+              isStart: true,
+              required: true,
+            ),
+            const SizedBox(height: 10),
+            _buildDateTimeTile(
+              label: 'End Date & Time',
+              value: _endDateTime,
+              isStart: false,
+              required: false,
+            ),
+
+            const SizedBox(height: 32),
+
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton.icon(
+                onPressed: _isLoading ? null : _updateEvent,
+                icon: _isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2))
+                    : const Icon(Icons.save_outlined),
+                label: Text(
+                  _isLoading ? 'Saving...' : 'Save Changes',
+                  style: GoogleFonts.inter(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.brandRed,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 40),
           ],
         ),
       ),
     );
   }
 
-  @override
-  void dispose() {
-    _titleController.dispose();
-    _descriptionController.dispose();
-    _locationController.dispose();
-    super.dispose();
+  Widget _removeButton() {
+    return Positioned(
+      top: 8,
+      right: 8,
+      child: GestureDetector(
+        onTap: () => setState(() {
+          _newImageFile = null;
+          _removeImage = true;
+        }),
+        child: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const Icon(Icons.close,
+              color: Colors.white, size: 16),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    int maxLines = 1,
+    String? Function(String?)? validator,
+    IconData? prefixIcon,
+  }) {
+    return TextFormField(
+      controller: controller,
+      maxLines: maxLines,
+      style: GoogleFonts.inter(fontSize: 14),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        labelStyle: GoogleFonts.inter(
+            color: AppColors.brandRed,
+            fontWeight: FontWeight.w500),
+        hintStyle: GoogleFonts.inter(
+            color: AppColors.mutedText, fontSize: 13),
+        prefixIcon: prefixIcon != null
+            ? Icon(prefixIcon,
+                color: AppColors.mutedText, size: 20)
+            : null,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide:
+              const BorderSide(color: AppColors.borderSubtle),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide:
+              const BorderSide(color: AppColors.borderSubtle),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+              color: AppColors.brandRed, width: 1.5),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.red),
+        ),
+        filled: true,
+        fillColor: AppColors.cardWhite,
+        contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16, vertical: 14),
+      ),
+      validator: validator,
+    );
+  }
+
+  Widget _buildToggleCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.cardWhite,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
+      child: SwitchListTile(
+        contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16, vertical: 4),
+        secondary: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: AppColors.brandRed.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: AppColors.brandRed, size: 20),
+        ),
+        title: Text(title,
+            style: GoogleFonts.inter(
+                fontSize: 14, fontWeight: FontWeight.w500)),
+        subtitle: Text(subtitle,
+            style: GoogleFonts.inter(
+                fontSize: 12, color: AppColors.mutedText)),
+        value: value,
+        activeColor: AppColors.brandRed,
+        onChanged: onChanged,
+      ),
+    );
+  }
+
+  Widget _buildDateTimeTile({
+    required String label,
+    required DateTime? value,
+    required bool isStart,
+    required bool required,
+  }) {
+    return GestureDetector(
+      onTap: () => _pickDateTime(isStart),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.cardWhite,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: value != null
+                ? AppColors.brandRed.withOpacity(0.4)
+                : AppColors.borderSubtle,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.brandRed.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.calendar_today_outlined,
+                  color: AppColors.brandRed, size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$label${required ? ' *' : ''}',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: AppColors.mutedText,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _formatDateTime(value),
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: value != null
+                          ? AppColors.darkText
+                          : AppColors.mutedText,
+                      fontWeight: value != null
+                          ? FontWeight.w500
+                          : FontWeight.normal,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              value != null
+                  ? Icons.edit_outlined
+                  : Icons.add_circle_outline,
+              color: AppColors.brandRed,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
