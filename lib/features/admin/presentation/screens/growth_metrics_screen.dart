@@ -1,10 +1,11 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:alumni/core/constants/app_colors.dart';
+import 'package:alumni/core/constants/app_colors.dart'; // Ensure this exists
 
 class GrowthMetricsScreen extends StatefulWidget {
   const GrowthMetricsScreen({super.key});
@@ -14,42 +15,44 @@ class GrowthMetricsScreen extends StatefulWidget {
 }
 
 class _GrowthMetricsScreenState extends State<GrowthMetricsScreen> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  
+  // Data State
   int totalAlumni = 0;
   int activeUsers = 0;
   int totalEvents = 0;
   int totalChapters = 0;
   List<Map<String, dynamic>> monthlyGrowth = [];
   bool isLoading = true;
-  String? errorMessage;
-  StreamSubscription? _usersSubscription;
+  StreamSubscription? _metricsSubscription;
 
   @override
   void initState() {
     super.initState();
     _listenToLiveMetrics();
-    _loadHistoricalGrowth();
+    _load12MonthGrowth();
   }
 
   @override
   void dispose() {
-    _usersSubscription?.cancel();
+    _metricsSubscription?.cancel();
     super.dispose();
   }
 
   int get inactiveUsers => (totalAlumni - activeUsers).clamp(0, totalAlumni);
 
-  // ── Your data loading methods (unchanged) ──
+  // --- 1. Platform Snapshot: Live Firestore Sync ---
   void _listenToLiveMetrics() {
     final firestore = FirebaseFirestore.instance;
-    _usersSubscription = firestore.collection('users').snapshots().listen((_) async {
-      if (!mounted) return;
+    _metricsSubscription = firestore.collection('users').snapshots().listen((_) async {
       try {
         final results = await Future.wait([
           firestore.collection('users').count().get(),
           firestore.collection('users').where('status', isEqualTo: 'active').count().get(),
           firestore.collection('events').count().get(),
           firestore.collection('chapters').count().get(),
-        ]);
+        ]).timeout(const Duration(seconds: 5));
+
         if (!mounted) return;
         setState(() {
           totalAlumni = results[0].count ?? 0;
@@ -57,325 +60,195 @@ class _GrowthMetricsScreenState extends State<GrowthMetricsScreen> {
           totalEvents = results[2].count ?? 0;
           totalChapters = results[3].count ?? 0;
           isLoading = false;
-          errorMessage = null;
         });
       } catch (e) {
-        if (mounted) {
-          setState(() {
-            errorMessage = 'Failed to load metrics';
-            isLoading = false;
-          });
-        }
+        if (mounted) setState(() => isLoading = false);
       }
     });
   }
 
-  Future<void> _loadHistoricalGrowth() async {
+  // --- 2. Growth: 12 Months Logic ---
+  Future<void> _load12MonthGrowth() async {
     try {
-      final firestore = FirebaseFirestore.instance;
-      final now = DateTime.now();
-      final start = DateTime(now.year - 1, now.month + 1, 1);
-      final snap = await firestore
+      final snap = await FirebaseFirestore.instance
           .collection('monthly_metrics')
-          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
-          .orderBy('timestamp')
-          .limit(12)
+          .orderBy('timestamp', descending: false)
+          .limit(12) // Fetches the full year
           .get();
 
-      if (mounted) {
+      if (mounted && snap.docs.isNotEmpty) {
         setState(() {
-          monthlyGrowth = snap.docs.map((doc) {
-            final data = doc.data();
-            final ts = data['timestamp'] as Timestamp?;
-            return {
-              'month': ts != null ? DateFormat('MMM yy').format(ts.toDate()) : 'N/A',
-              'alumni': data['totalAlumni'] as int? ?? 0,
-              'active': data['activeUsers'] as int? ?? 0,
-            };
+          monthlyGrowth = snap.docs.map((doc) => {
+            'month': DateFormat('MMM').format((doc.data()['timestamp'] as Timestamp).toDate()),
+            'value': (doc.data()['totalAlumni'] as num?)?.toDouble() ?? 0.0,
           }).toList();
         });
       }
-    } catch (_) {
-      // silent fail
+    } catch (e) {
+      debugPrint("12-Month Chart Error: $e");
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.softWhite,
-      appBar: AppBar(
-        backgroundColor: AppColors.cardWhite,
-        elevation: 0,
-        title: Text(
-          'Growth',
-          style: GoogleFonts.cormorantGaramond(
-            fontSize: 26,
-            fontWeight: FontWeight.w300,
-            color: AppColors.darkText,
-          ),
-        ),
-      ),
-      body: isLoading
+      key: _scaffoldKey,
+      backgroundColor: const Color(0xFFF3F4F6),
+      appBar: _buildAppBar(),
+      body: isLoading 
           ? const Center(child: CircularProgressIndicator(color: AppColors.brandRed))
-          : errorMessage != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Text(
-                      errorMessage!,
-                      style: GoogleFonts.inter(color: AppColors.error, fontSize: 16),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    final width = constraints.maxWidth;
-                    final isNarrow = width < 700;
-
-                    final horizontalPad = (width * 0.05).clamp(16.0, 48.0);
-                    final verticalPad = (constraints.maxHeight * 0.02).clamp(12.0, 32.0);
-
-                    int gridColumns = isNarrow ? 2 : 4;
-                    double cardAspect = isNarrow ? 1.35 : 1.55;
-
-                    return SingleChildScrollView(
-                      padding: EdgeInsets.fromLTRB(horizontalPad, verticalPad, horizontalPad, verticalPad + 40),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Platform Snapshot',
-                            style: GoogleFonts.cormorantGaramond(fontSize: 28, fontWeight: FontWeight.w400, color: AppColors.darkText),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'LIVE • Firestore',
-                            style: GoogleFonts.inter(fontSize: 11, color: AppColors.mutedText),
-                          ),
-                          const SizedBox(height: 24),
-
-                          // Stats cards
-                          GridView.count(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            crossAxisCount: gridColumns,
-                            crossAxisSpacing: 12,
-                            mainAxisSpacing: 12,
-                            childAspectRatio: cardAspect,
-                            children: [
-                              _buildCompactCard('TOTAL ALUMNI', totalAlumni.toString(), 'members'),
-                              _buildCompactCard('ACTIVE', activeUsers.toString(), 'now', AppColors.success),
-                              _buildCompactCard('EVENTS', totalEvents.toString(), 'total'),
-                              _buildCompactCard('CHAPTERS', totalChapters.toString(), 'active'),
-                            ],
-                          ),
-
-                          const SizedBox(height: 32),
-
-                          // Growth chart section
-                          Text(
-                            'Growth – 12 months',
-                            style: GoogleFonts.cormorantGaramond(fontSize: 22, color: AppColors.darkText),
-                          ),
-                          const SizedBox(height: 12),
-                          AspectRatio(
-                            aspectRatio: isNarrow ? 1.6 : 2.2,
-                            child: monthlyGrowth.isEmpty
-                                ? const Center(child: Text('No historical data yet', style: TextStyle(fontSize: 14, color: Colors.grey)))
-                                : LineChart(
-                                    LineChartData(
-                                      gridData: const FlGridData(show: false),
-                                      titlesData: FlTitlesData(
-                                        show: true,
-                                        bottomTitles: AxisTitles(
-                                          sideTitles: SideTitles(
-                                            showTitles: true,
-                                            reservedSize: 24,
-                                            interval: 2,
-                                            getTitlesWidget: (value, meta) {
-                                              final i = value.toInt();
-                                              if (i % 2 == 0 && i < monthlyGrowth.length) {
-                                                return Padding(
-                                                  padding: const EdgeInsets.only(top: 6),
-                                                  child: Text(
-                                                    monthlyGrowth[i]['month'],
-                                                    style: const TextStyle(fontSize: 10),
-                                                  ),
-                                                );
-                                              }
-                                              return const Text('');
-                                            },
-                                          ),
-                                        ),
-                                        leftTitles: AxisTitles(
-                                          sideTitles: SideTitles(
-                                            showTitles: true,
-                                            reservedSize: 32,
-                                            interval: 5000,
-                                            getTitlesWidget: (v, m) => Text(
-                                              '${(v / 1000).toStringAsFixed(0)}k',
-                                              style: const TextStyle(fontSize: 10),
-                                            ),
-                                          ),
-                                        ),
-                                        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                                      ),
-                                      borderData: FlBorderData(show: false),
-                                      minX: 0,
-                                      maxX: (monthlyGrowth.length - 1).toDouble(),
-                                      minY: 0,
-                                      lineBarsData: [
-                                        LineChartBarData(
-                                          spots: monthlyGrowth.asMap().entries.map((e) => FlSpot(e.key.toDouble(), (e.value['alumni'] as num?)?.toDouble() ?? 0)).toList(),
-                                          isCurved: true,
-                                          color: AppColors.brandRed,
-                                          barWidth: 2.2,
-                                          dotData: const FlDotData(show: false),
-                                        ),
-                                        LineChartBarData(
-                                          spots: monthlyGrowth.asMap().entries.map((e) => FlSpot(e.key.toDouble(), (e.value['active'] as num?)?.toDouble() ?? 0)).toList(),
-                                          isCurved: true,
-                                          color: AppColors.success,
-                                          barWidth: 2.2,
-                                          dotData: const FlDotData(show: false),
-                                        ),
-                                      ],
-                                      lineTouchData: const LineTouchData(enabled: false),
-                                    ),
-                                  ),
-                          ),
-
-                          const SizedBox(height: 32),
-
-                          // Donut chart section
-                          Text(
-                            'Active vs Inactive Members',
-                            style: GoogleFonts.cormorantGaramond(fontSize: 22, color: AppColors.darkText),
-                          ),
-                          const SizedBox(height: 12),
-                          AspectRatio(
-                            aspectRatio: isNarrow ? 1.3 : 1.6,
-                            child: totalAlumni == 0
-                                ? const Center(child: Text('No data available', style: TextStyle(fontSize: 14, color: Colors.grey)))
-                                : Stack(
-                                    alignment: Alignment.center,
-                                    children: [
-                                      PieChart(
-                                        PieChartData(
-                                          sectionsSpace: 3,
-                                          centerSpaceRadius: 48,
-                                          startDegreeOffset: -90,
-                                          sections: [
-                                            PieChartSectionData(
-                                              value: activeUsers.toDouble(),
-                                              color: AppColors.success,
-                                              radius: 60,
-                                              title: activeUsers > 5 ? '${((activeUsers / totalAlumni) * 100).toStringAsFixed(0)}%' : '',
-                                              titleStyle: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.bold),
-                                            ),
-                                            PieChartSectionData(
-                                              value: inactiveUsers.toDouble(),
-                                              color: AppColors.borderSubtle,
-                                              radius: 60,
-                                              title: inactiveUsers > 5 ? '${((inactiveUsers / totalAlumni) * 100).toStringAsFixed(0)}%' : '',
-                                              titleStyle: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.bold),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          FittedBox(
-                                            fit: BoxFit.scaleDown,
-                                            child: Text(
-                                              totalAlumni.toString(),
-                                              style: GoogleFonts.cormorantGaramond(fontSize: 36, fontWeight: FontWeight.w300),
-                                            ),
-                                          ),
-                                          const Text('total members', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                          ),
-
-                          const SizedBox(height: 16),
-
-                          // Legend
-                          Center(
-                            child: Wrap(
-                              spacing: 32,
-                              runSpacing: 12,
-                              children: [
-                                _buildTinyLegend(AppColors.success, 'Active'),
-                                _buildTinyLegend(AppColors.borderSubtle, 'Inactive'),
-                              ],
-                            ),
-                          ),
-
-                          const SizedBox(height: 40),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+          : _buildWebLayout(),
     );
   }
 
-  Widget _buildCompactCard(String title, String value, String subtitle, [Color? accentColor]) {
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      backgroundColor: Colors.white,
+      elevation: 0.5,
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black, size: 20),
+        onPressed: () => Navigator.pushReplacementNamed(context, '/admin_dashboard'),
+      ),
+      title: Text('Growth Metrics', 
+        style: GoogleFonts.plusJakartaSans(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 18)),
+      centerTitle: false,
+    );
+  }
+
+  Widget _buildWebLayout() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildLiveCounterGrid(),
+              const SizedBox(height: 24),
+              _buildChartCard("12-Month Growth", _buildLineChart()),
+              const SizedBox(height: 24),
+              _buildChartCard("Member Activity Status (Active vs Inactive)", _buildBarChart()),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- UI: LIVE SNAPSHOT CARDS ---
+  Widget _buildLiveCounterGrid() {
+    return GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: MediaQuery.of(context).size.width > 900 ? 4 : 2,
+      crossAxisSpacing: 16,
+      mainAxisSpacing: 16,
+      childAspectRatio: 1.5,
+      children: [
+        _snapshotCard("Total Alumni", totalAlumni.toString(), Icons.groups_rounded, Colors.blue),
+        _snapshotCard("Active Users", activeUsers.toString(), Icons.bolt_rounded, Colors.orange),
+        _snapshotCard("Total Events", totalEvents.toString(), Icons.event_available_rounded, Colors.purple),
+        _snapshotCard("Chapters", totalChapters.toString(), Icons.map_rounded, Colors.green),
+      ],
+    );
+  }
+
+  Widget _snapshotCard(String label, String value, IconData icon, Color color) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.cardWhite,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.borderSubtle, width: 0.5),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)],
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(
-            title.toUpperCase(),
-            style: GoogleFonts.inter(fontSize: 10, letterSpacing: 0.8, color: AppColors.mutedText, fontWeight: FontWeight.w600),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 6),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              value,
-              style: GoogleFonts.cormorantGaramond(
-                fontSize: 32,
-                fontWeight: FontWeight.w300,
-                color: accentColor ?? AppColors.darkText,
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: GoogleFonts.inter(fontSize: 11, color: AppColors.mutedText),
+          Icon(icon, color: color, size: 28),
+          const SizedBox(height: 12),
+          Text(value, style: GoogleFonts.plusJakartaSans(fontSize: 24, fontWeight: FontWeight.bold)),
+          Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: Colors.grey[600])),
+        ],
+      ),
+    );
+  }
+
+  // --- UI: CHART WRAPPERS ---
+  Widget _buildChartCard(String title, Widget chart) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 32),
+          SizedBox(height: 300, child: chart),
+        ],
+      ),
+    );
+  }
+
+  // --- 12 MONTH LINE CHART ---
+  Widget _buildLineChart() {
+    if (monthlyGrowth.isEmpty) return const Center(child: Text("Fetching 12-month data..."));
+    return LineChart(
+      LineChartData(
+        gridData: const FlGridData(show: false),
+        borderData: FlBorderData(show: false),
+        titlesData: FlTitlesData(
+          rightTitles: const AxisTitles(), topTitles: const AxisTitles(),
+          bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v, m) {
+            int i = v.toInt();
+            if (i < 0 || i >= monthlyGrowth.length) return const SizedBox();
+            return Padding(
+              padding: const EdgeInsets.only(top: 8.0),
+              child: Text(monthlyGrowth[i]['month'], style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            );
+          })),
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: monthlyGrowth.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value['value'])).toList(),
+            isCurved: true,
+            color: AppColors.brandRed,
+            barWidth: 4,
+            isStrokeCapRound: true,
+            belowBarData: BarAreaData(show: true, color: AppColors.brandRed.withOpacity(0.05)),
+            dotData: const FlDotData(show: false),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildTinyLegend(Color color, String label) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+  // --- ACTIVE VS INACTIVE BAR CHART ---
+  Widget _buildBarChart() {
+    return BarChart(
+      BarChartData(
+        alignment: BarChartAlignment.spaceAround,
+        maxY: totalAlumni.toDouble() + (totalAlumni * 0.1),
+        barTouchData: BarTouchData(enabled: true),
+        gridData: const FlGridData(show: false),
+        borderData: FlBorderData(show: false),
+        titlesData: FlTitlesData(
+          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 40)),
+          bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: true, getTitlesWidget: (v, m) {
+            return Text(v == 0 ? "Active" : "Inactive", style: const TextStyle(fontWeight: FontWeight.bold));
+          })),
+          topTitles: const AxisTitles(), rightTitles: const AxisTitles(),
         ),
-        const SizedBox(width: 8),
-        Text(label, style: GoogleFonts.inter(fontSize: 12, color: Colors.grey[700])),
-      ],
+        barGroups: [
+          BarChartGroupData(x: 0, barRods: [
+            BarChartRodData(toY: activeUsers.toDouble(), color: Colors.greenAccent[700], width: 50, borderRadius: BorderRadius.circular(6))
+          ]),
+          BarChartGroupData(x: 1, barRods: [
+            BarChartRodData(toY: inactiveUsers.toDouble(), color: AppColors.brandRed, width: 50, borderRadius: BorderRadius.circular(6))
+          ]),
+        ],
+      ),
     );
   }
 }

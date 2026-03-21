@@ -600,7 +600,7 @@ class _FeatureRow extends StatelessWidget {
         children: [
           Icon(icon, color: color, size: 20),
           const SizedBox(width: 12),
-          Text(text, style: GoogleFonts.inter(color: const Color(0xFF5F6368))),
+          Text(text, style: GoogleFonts.inter(color: color, fontWeight: FontWeight.w600)),
         ],
       ),
     );
