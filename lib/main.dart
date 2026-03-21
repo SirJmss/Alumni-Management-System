@@ -1,4 +1,6 @@
+import 'package:alumni/features/profile/presentation/screens/edit_profile_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'firebase_options.dart';
 import 'package:alumni/features/admin/presentation/screens/growth_metrics_screen.dart';
@@ -14,11 +16,23 @@ import 'package:alumni/features/admin/presentation/screens/chapter_management_sc
 import 'package:alumni/features/admin/presentation/screens/reunion_planning_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/career_milestones_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/announcement_management_screen.dart';
+import 'package:alumni/features/event/presentation/screens/discussions_screen.dart';
+import 'package:alumni/features/event/presentation/screens/event_list_screen.dart';
+import 'package:alumni/features/communication/messages_screen.dart';
+import 'package:alumni/features/network/friends_screen.dart';
+import 'package:alumni/features/auth/presentation/screens/settings_screen.dart';
+import 'package:alumni/features/profile/presentation/screens/profile_screen.dart';
+import 'package:alumni/features/announcements/presentation/screens/announcements_screen.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: false,
   );
 
   runApp(const MyApp());
@@ -36,28 +50,48 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.red,
         useMaterial3: true,
         scaffoldBackgroundColor: Colors.white,
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF9B1D1D)),
+        colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF9B1D1D)),
       ),
-      home: const LandingPage(), // Starts on welcome/landing page
+      home: const LandingPage(),
       routes: {
         '/login': (context) => const LoginScreen(),
         '/register': (context) => const RegisterScreen(),
         '/gallery': (context) => const GalleryScreen(),
         '/dashboard': (context) => const DashboardScreen(),
         '/admin': (context) => const AdminDashboardWeb(),
-        '/growth_metrics': (context) => const GrowthMetricsScreen(),
-        '/user_verification_moderation': (context) => const UserVerificationScreen(),
-        '/event_planning': (context) => const EventPlanningScreen(),
-        '/job_board_management': (context) => const JobBoardManagementScreen(),
-        '/chapter_management': (context) => const ChapterManagementScreen(),
-        '/reunions_events': (context) => const ReunionAndEventsScreen(),
-        '/career_milestones': (context) => const CareerMilestonesScreen(),
-        '/announcement_management': (context) => const AnnouncementManagementScreen(),
-        '/admin_dashboard': (context) => const AdminDashboardWeb(),
+        '/growth_metrics': (context) =>
+            const GrowthMetricsScreen(),
+        '/user_verification_moderation': (context) =>
+            const UserVerificationScreen(),
+        '/event_planning': (context) =>
+            const EventPlanningScreen(),
+        '/job_board_management': (context) =>
+            const JobBoardManagementScreen(),
+        '/chapter_management': (context) =>
+            const ChapterManagementScreen(),
+        '/reunions_events': (context) =>
+            const ReunionAndEventsScreen(),
+        '/career_milestones': (context) =>
+            const CareerMilestonesScreen(),
+        '/announcement_management': (context) =>
+            const AnnouncementManagementScreen(),
+        '/admin_dashboard': (context) =>
+            const AdminDashboardWeb(),
+        '/discussions': (context) => const DiscussionsScreen(),
+        '/events': (context) => const EventListScreen(),
+        '/announcements': (context) =>const AnnouncementsScreen(),
+        '/messages': (context) => const MessagesScreen(),
+        '/friends': (context) => const FriendsScreen(),
+        '/settings': (context) => const SettingsScreen(),
+        '/profile': (context) => const AlumniProfileScreen(),
+        '/edit_profile': (context) => const EditProfileScreen(),
       },
     );
   }
 }
+
+
 
 // LandingPage (unchanged from your version)
 class LandingPage extends StatelessWidget {
@@ -403,5 +437,6 @@ class LandingPage extends StatelessWidget {
       ),
       onTap: onTap,
     );
+    
   }
 }

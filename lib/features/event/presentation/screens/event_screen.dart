@@ -1,8 +1,11 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+
+import 'package:alumni/core/constants/app_colors.dart';
 import 'edit_event_screen.dart';
 
 class EventScreen extends StatefulWidget {
@@ -19,10 +22,9 @@ class _EventScreenState extends State<EventScreen> {
   final _firestore = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
   bool _isPostingComment = false;
+  String? _userRole;
 
   String get eventId => widget.event['id'] as String;
-
-  String? _userRole;
 
   @override
   void initState() {
@@ -30,15 +32,24 @@ class _EventScreenState extends State<EventScreen> {
     _loadUserRole();
   }
 
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadUserRole() async {
     final user = _auth.currentUser;
     if (user == null) return;
-
     try {
-      final doc = await _firestore.collection('users').doc(user.uid).get();
+      final doc = await _firestore
+          .collection('users')
+          .doc(user.uid)
+          .get();
       if (doc.exists && mounted) {
         setState(() {
-          _userRole = doc.data()?['role'] as String? ?? 'alumni';
+          _userRole =
+              doc.data()?['role'] as String? ?? 'alumni';
         });
       }
     } catch (_) {
@@ -48,49 +59,107 @@ class _EventScreenState extends State<EventScreen> {
 
   bool get _canEditOrDelete {
     final currentUid = _auth.currentUser?.uid;
-    final creatorUid = widget.event['createdBy'] as String?;
+    final creatorUid =
+        widget.event['createdBy'] as String?;
     if (currentUid == null) return false;
-    if (_userRole == 'admin' || _userRole == 'moderator') return true;
+    if (_userRole == 'admin' ||
+        _userRole == 'moderator' ||
+        _userRole == 'staff' ||
+        _userRole == 'registrar') return true;
     return currentUid == creatorUid;
   }
 
   Future<void> _toggleLike() async {
-    // (your existing _toggleLike logic - unchanged)
     final user = _auth.currentUser;
     if (user == null) {
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please sign in to like events')),
+        const SnackBar(
+            content: Text('Please sign in to like events')),
       );
       return;
     }
 
-    final likeRef = _firestore.collection('events').doc(eventId).collection('likes').doc(user.uid);
+    final likeRef = _firestore
+        .collection('events')
+        .doc(eventId)
+        .collection('likes')
+        .doc(user.uid);
 
     try {
       final doc = await likeRef.get();
       if (doc.exists) {
         await likeRef.delete();
       } else {
-        await likeRef.set({'likedAt': FieldValue.serverTimestamp()});
+        await likeRef
+            .set({'likedAt': FieldValue.serverTimestamp()});
       }
     } on FirebaseException catch (e) {
       if (!mounted) return;
-      if (e.code == 'permission-denied') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('Error: ${e.message}'),
+            backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  Future<void> _deleteEvent() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title: Text('Delete Event',
+            style: GoogleFonts.inter(
+                fontWeight: FontWeight.w700,
+                color: AppColors.brandRed)),
+        content: Text(
+            'This event will be permanently deleted.',
+            style: GoogleFonts.inter()),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel',
+                style: GoogleFonts.inter(
+                    color: AppColors.mutedText)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Delete',
+                style: GoogleFonts.inter(
+                    color: AppColors.brandRed,
+                    fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      await _firestore
+          .collection('events')
+          .doc(eventId)
+          .delete();
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Only alumni can like this event'), backgroundColor: Colors.orange),
+          const SnackBar(
+              content: Text('Event deleted'),
+              backgroundColor: Colors.grey),
         );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ${e.message}')));
+        Navigator.pop(context);
       }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unexpected error: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
   Future<void> _addComment() async {
-    // (your existing _addComment logic - unchanged, just colors adjusted in UI)
     final user = _auth.currentUser;
     final text = _commentController.text.trim();
     if (user == null || text.isEmpty) return;
@@ -98,21 +167,30 @@ class _EventScreenState extends State<EventScreen> {
     setState(() => _isPostingComment = true);
 
     try {
-      String userName = user.displayName ?? 'Anonymous';
+      String userName =
+          user.displayName ?? 'Anonymous';
       String? userPhoto = user.photoURL;
 
       try {
-        final doc = await _firestore.collection('users').doc(user.uid).get();
+        final doc = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .get();
         if (doc.exists) {
           final data = doc.data();
-          userName = userName == 'Anonymous'
-              ? (data?['name'] as String? ?? data?['fullName'] as String? ?? userName)
-              : userName;
-          userPhoto = userPhoto ?? (data?['photoUrl'] as String? ?? data?['photoURL'] as String?);
+          userName = data?['name']?.toString() ??
+              data?['fullName']?.toString() ??
+              userName;
+          userPhoto = userPhoto ??
+              data?['profilePictureUrl']?.toString();
         }
       } catch (_) {}
 
-      await _firestore.collection('events').doc(eventId).collection('comments').add({
+      await _firestore
+          .collection('events')
+          .doc(eventId)
+          .collection('comments')
+          .add({
         'text': text,
         'userId': user.uid,
         'userName': userName,
@@ -122,13 +200,13 @@ class _EventScreenState extends State<EventScreen> {
 
       _commentController.clear();
       FocusScope.of(context).unfocus();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Comment posted')));
-      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error posting comment: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: Colors.red),
+        );
       }
     } finally {
       if (mounted) setState(() => _isPostingComment = false);
@@ -138,269 +216,418 @@ class _EventScreenState extends State<EventScreen> {
   @override
   Widget build(BuildContext context) {
     final event = widget.event;
+    final startTs = event['startDate'] as Timestamp?;
+    final dt = startTs?.toDate();
+    final dateFormatted = dt != null
+        ? DateFormat('EEEE, MMM dd yyyy').format(dt)
+        : 'TBD';
+    final timeFormatted =
+        dt != null ? DateFormat('hh:mm a').format(dt) : 'TBD';
+    final endTs = event['endDate'] as Timestamp?;
+    final endFormatted = endTs != null
+        ? DateFormat('hh:mm a').format(endTs.toDate())
+        : null;
 
-    final startDateTs = event['startDate'] as Timestamp?;
-    final dateFormatted = startDateTs != null ? DateFormat('MMM dd, yyyy').format(startDateTs.toDate()) : 'TBD';
-    final timeFormatted = startDateTs != null ? DateFormat('hh:mm a').format(startDateTs.toDate()) : 'TBD';
-
-    final location = event['location'] as String? ?? 'Location TBD';
-    final title = event['title'] ?? 'Event Title';
-    final description = event['description'] ?? 'No description available.';
-    final heroImageUrl = event['heroImageUrl'] as String? ??
-        'https://images.unsplash.com/photo-1503387762-592deb58caa5?auto=format&fit=crop&q=80'; // warmer fallback image
-
-    final price = (event['price'] as num?)?.toStringAsFixed(2) ?? 'Free';
-    final capacity = event['capacity']?.toString() ?? 'Limited';
-    final category = event['category'] ?? 'ALUMNI EVENT';
-    final tagline = event['tagline'] ?? 'Connecting generations through shared experiences';
-
-    final primaryRed = const Color(0xFFB22222);     // deep red/maroon accent like UPDATE PROFILE button
-    final backgroundCream = const Color(0xFFFAF7F2); // warm off-white
-    final textDark = const Color(0xFF1A1C35);       // navy dark text
-    final textSecondary = const Color(0xFF5F6368);
+    final location =
+        event['location']?.toString() ?? 'Location TBD';
+    final title =
+        event['title']?.toString() ?? 'Event';
+    final description =
+        event['description']?.toString() ??
+            'No description available.';
+    final heroImageUrl =
+        event['heroImageUrl']?.toString() ?? '';
+    final isVirtual =
+        event['isVirtual'] as bool? ?? false;
+    final isImportant =
+        event['isImportant'] as bool? ?? false;
+    final type =
+        event['type']?.toString() ?? 'Campus Event';
+    final maxAttendees = event['maxAttendees'];
 
     return Scaffold(
-      backgroundColor: backgroundCream,
-      appBar: AppBar(
-        backgroundColor: backgroundCream,
-        elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back, color: textDark),
-          onPressed: () => Navigator.pop(context),
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.more_vert, color: textDark),
-            onPressed: () {},
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Hero section – elegant, less aggressive gradient
-            Container(
-              height: 380,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                image: DecorationImage(
-                  image: NetworkImage(heroImageUrl),
-                  fit: BoxFit.cover,
-                  colorFilter: ColorFilter.mode(Colors.black.withOpacity(0.45), BlendMode.darken),
+      backgroundColor: AppColors.softWhite,
+      body: CustomScrollView(
+        slivers: [
+          // ─── SliverAppBar with image ───
+          SliverAppBar(
+            expandedHeight: 280,
+            pinned: true,
+            backgroundColor: AppColors.cardWhite,
+            iconTheme:
+                const IconThemeData(color: Colors.white),
+            actions: [
+              if (_canEditOrDelete) ...[
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined,
+                      color: Colors.white),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EditEventScreen(
+                          eventId: eventId,
+                          event: widget.event),
+                    ),
+                  ),
                 ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(32, 80, 32, 40),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: primaryRed.withOpacity(0.9),
-                        borderRadius: BorderRadius.circular(30),
-                      ),
-                      child: Text(
-                        category.toUpperCase(),
-                        style: GoogleFonts.inter(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
+                IconButton(
+                  icon: const Icon(
+                      Icons.delete_outline,
+                      color: Colors.white),
+                  onPressed: _deleteEvent,
+                ),
+              ],
+            ],
+            flexibleSpace: FlexibleSpaceBar(
+              background: Stack(
+                fit: StackFit.expand,
+                children: [
+                  heroImageUrl.isNotEmpty
+                      ? CachedNetworkImage(
+                          imageUrl: heroImageUrl,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => Container(
+                              color: AppColors.borderSubtle),
+                          errorWidget: (_, __, ___) =>
+                              Container(
+                            color: AppColors.borderSubtle,
+                            child: const Icon(
+                                Icons.event_outlined,
+                                size: 64,
+                                color: AppColors.mutedText),
+                          ),
+                        )
+                      : Container(
+                          color: AppColors.brandRed
+                              .withOpacity(0.2),
+                          child: const Icon(
+                              Icons.event_outlined,
+                              size: 80,
+                              color: AppColors.mutedText),
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      title,
-                      style: GoogleFonts.playfairDisplay(
-                        fontSize: 38,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                        height: 1.1,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      tagline,
-                      style: GoogleFonts.inter(
-                        fontSize: 18,
-                        color: Colors.white.withOpacity(0.9),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // Quick info chips – elegant style
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 32, 24, 16),
-              child: Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  _ElegantChip(icon: Icons.calendar_today, label: dateFormatted, color: textDark),
-                  _ElegantChip(icon: Icons.access_time, label: timeFormatted, color: textDark),
-                  _ElegantChip(icon: Icons.location_on, label: location, color: textDark),
-                  _ElegantChip(icon: Icons.group, label: '$capacity spots', color: textDark),
-                ],
-              ),
-            ),
-
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'About',
-                    style: GoogleFonts.playfairDisplay(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      color: textDark,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    description,
-                    style: GoogleFonts.inter(
-                      fontSize: 16,
-                      height: 1.6,
-                      color: textSecondary,
-                    ),
-                  ),
-
-                  const SizedBox(height: 32),
-
-                  // Action bar
-                  _buildActionBar(primaryRed, textDark),
-
-                  const SizedBox(height: 40),
-
-                  // Registration / ticket card – clean and premium
-                  Card(
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    color: Colors.white,
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                price == '0.00' ? 'Free' : '\$$price',
-                                style: GoogleFonts.inter(
-                                  fontSize: 32,
-                                  fontWeight: FontWeight.w800,
-                                  color: textDark,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text('/ person', style: GoogleFonts.inter(color: textSecondary)),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          _FeatureRow(icon: Icons.verified, text: 'Verified Alumni Event', color: primaryRed),
-                          _FeatureRow(icon: Icons.calendar_month, text: 'Campus / Virtual Access', color: primaryRed),
-                          const SizedBox(height: 24),
-                          SizedBox(
-                            width: double.infinity,
-                            height: 56,
-                            child: ElevatedButton(
-                              onPressed: () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Registration flow coming soon')),
-                                );
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: primaryRed,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                              child: Text(
-                                'Register / RSVP',
-                                style: GoogleFonts.inter(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ),
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.2),
+                          Colors.black.withOpacity(0.7),
                         ],
                       ),
                     ),
                   ),
-
-                  const SizedBox(height: 40),
-
-                  Text(
-                    'Comments',
-                    style: GoogleFonts.playfairDisplay(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w700,
-                      color: textDark,
+                  Positioned(
+                    bottom: 20,
+                    left: 20,
+                    right: 20,
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          _heroBadge(type.toUpperCase(),
+                              AppColors.brandRed),
+                          if (isVirtual) ...[
+                            const SizedBox(width: 6),
+                            _heroBadge('VIRTUAL',
+                                Colors.blue.shade600),
+                          ],
+                          if (isImportant) ...[
+                            const SizedBox(width: 6),
+                            _heroBadge('★ IMPORTANT',
+                                Colors.orange.shade700),
+                          ],
+                        ]),
+                        const SizedBox(height: 8),
+                        Text(
+                          title,
+                          style:
+                              GoogleFonts.cormorantGaramond(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            height: 1.2,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  _buildCommentsSection(textDark, textSecondary),
                 ],
               ),
             ),
+          ),
 
-            const SizedBox(height: 80),
-          ],
-        ),
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ─── Info chips ───
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _infoChip(
+                              Icons.calendar_today_outlined,
+                              dateFormatted),
+                          _infoChip(
+                              Icons.access_time_outlined,
+                              endFormatted != null
+                                  ? '$timeFormatted – $endFormatted'
+                                  : timeFormatted),
+                          _infoChip(
+                              Icons.location_on_outlined,
+                              location),
+                          if (maxAttendees != null)
+                            _infoChip(Icons.people_outline,
+                                '$maxAttendees max attendees'),
+                        ],
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // ─── Like / Comment actions ───
+                      Row(children: [
+                        StreamBuilder<QuerySnapshot>(
+                          stream: _firestore
+                              .collection('events')
+                              .doc(eventId)
+                              .collection('likes')
+                              .snapshots(),
+                          builder: (context, snap) {
+                            final count =
+                                snap.data?.docs.length ?? 0;
+                            final liked = snap.data?.docs.any(
+                                    (d) =>
+                                        d.id ==
+                                        _auth
+                                            .currentUser
+                                            ?.uid) ??
+                                false;
+                            return GestureDetector(
+                              onTap: _toggleLike,
+                              child: Row(children: [
+                                Icon(
+                                  liked
+                                      ? Icons.favorite
+                                      : Icons.favorite_border,
+                                  color: liked
+                                      ? AppColors.brandRed
+                                      : AppColors.mutedText,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 6),
+                                Text('$count',
+                                    style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        color:
+                                            AppColors.mutedText)),
+                              ]),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 20),
+                        StreamBuilder<QuerySnapshot>(
+                          stream: _firestore
+                              .collection('events')
+                              .doc(eventId)
+                              .collection('comments')
+                              .snapshots(),
+                          builder: (context, snap) {
+                            final count =
+                                snap.data?.docs.length ?? 0;
+                            return Row(children: [
+                              const Icon(
+                                  Icons.chat_bubble_outline,
+                                  color: AppColors.mutedText,
+                                  size: 22),
+                              const SizedBox(width: 6),
+                              Text('$count',
+                                  style: GoogleFonts.inter(
+                                      fontSize: 13,
+                                      color:
+                                          AppColors.mutedText)),
+                            ]);
+                          },
+                        ),
+                      ]),
+
+                      const SizedBox(height: 24),
+                      const Divider(
+                          color: AppColors.borderSubtle),
+                      const SizedBox(height: 20),
+
+                      // ─── About ───
+                      Text('About',
+                          style: GoogleFonts.cormorantGaramond(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.darkText)),
+                      const SizedBox(height: 12),
+                      Text(description,
+                          style: GoogleFonts.inter(
+                              fontSize: 14,
+                              height: 1.7,
+                              color: AppColors.darkText)),
+
+                      const SizedBox(height: 24),
+
+                      // ─── RSVP card ───
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: AppColors.cardWhite,
+                          borderRadius:
+                              BorderRadius.circular(16),
+                          border: Border.all(
+                              color: AppColors.borderSubtle),
+                        ),
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            Text('Registration / RSVP',
+                                style:
+                                    GoogleFonts.cormorantGaramond(
+                                        fontSize: 20,
+                                        fontWeight:
+                                            FontWeight.w600)),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Secure your spot for this event.',
+                              style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  color: AppColors.mutedText),
+                            ),
+                            const SizedBox(height: 16),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 48,
+                              child: ElevatedButton(
+                                onPressed: () {
+                                  ScaffoldMessenger.of(context)
+                                      .showSnackBar(
+                                    const SnackBar(
+                                        content: Text(
+                                            'RSVP coming soon')),
+                                  );
+                                },
+                                style:
+                                    ElevatedButton.styleFrom(
+                                  backgroundColor:
+                                      AppColors.brandRed,
+                                  foregroundColor:
+                                      Colors.white,
+                                  shape:
+                                      RoundedRectangleBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(
+                                            10),
+                                  ),
+                                ),
+                                child: Text('RSVP Now',
+                                    style: GoogleFonts.inter(
+                                        fontSize: 15,
+                                        fontWeight:
+                                            FontWeight.w600)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+                      const Divider(
+                          color: AppColors.borderSubtle),
+                      const SizedBox(height: 16),
+
+                      // ─── Comments ───
+                      Text('Comments',
+                          style: GoogleFonts.cormorantGaramond(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.darkText)),
+                      const SizedBox(height: 16),
+                      _buildComments(),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 100),
+              ],
+            ),
+          ),
+        ],
       ),
 
-      // Bottom comment input – elegant light style
+      // ─── Comment input ───
       bottomNavigationBar: Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        padding: EdgeInsets.fromLTRB(
+            16,
+            12,
+            16,
+            MediaQuery.of(context).viewInsets.bottom + 12),
         decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: Colors.grey.shade200)),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, -2)),
-          ],
+          color: AppColors.cardWhite,
+          border: const Border(
+              top: BorderSide(color: AppColors.borderSubtle)),
         ),
         child: Row(
           children: [
             CircleAvatar(
-              radius: 20,
-              backgroundColor: primaryRed.withOpacity(0.1),
-              child: Icon(Icons.person, color: primaryRed),
+              radius: 18,
+              backgroundColor:
+                  AppColors.brandRed.withOpacity(0.1),
+              child: const Icon(Icons.person,
+                  color: AppColors.brandRed, size: 18),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             Expanded(
               child: TextField(
                 controller: _commentController,
-                style: GoogleFonts.inter(color: textDark),
+                style: GoogleFonts.inter(fontSize: 14),
                 decoration: InputDecoration(
-                  hintText: 'Share your thoughts...',
-                  hintStyle: GoogleFonts.inter(color: textSecondary),
+                  hintText: 'Write a comment...',
+                  hintStyle: GoogleFonts.inter(
+                      color: AppColors.mutedText,
+                      fontSize: 14),
                   filled: true,
-                  fillColor: Colors.grey.shade50,
+                  fillColor: AppColors.softWhite,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(30),
+                    borderRadius: BorderRadius.circular(24),
                     borderSide: BorderSide.none,
                   ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
                 ),
               ),
             ),
-            const SizedBox(width: 12),
-            IconButton(
-              icon: _isPostingComment
-                  ? SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: primaryRed),
-                    )
-                  : Icon(Icons.send, color: primaryRed, size: 28),
-              onPressed: _isPostingComment ? null : _addComment,
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: _isPostingComment ? null : _addComment,
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.brandRed,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: _isPostingComment
+                    ? const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2),
+                      )
+                    : const Icon(Icons.send,
+                        color: Colors.white, size: 18),
+              ),
             ),
           ],
         ),
@@ -408,68 +635,7 @@ class _EventScreenState extends State<EventScreen> {
     );
   }
 
-  Widget _buildActionBar(Color primaryRed, Color textDark) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Row(
-          children: [
-            StreamBuilder<QuerySnapshot>(
-              stream: _firestore.collection('events').doc(eventId).collection('likes').snapshots(),
-              builder: (context, snapshot) {
-                final count = snapshot.data?.docs.length ?? 0;
-                final liked = snapshot.data?.docs.any((d) => d.id == _auth.currentUser?.uid) ?? false;
-                return GestureDetector(
-                  onTap: _toggleLike,
-                  child: Row(
-                    children: [
-                      Icon(
-                        liked ? Icons.favorite : Icons.favorite_border,
-                        color: liked ? primaryRed : textDark.withOpacity(0.7),
-                        size: 26,
-                      ),
-                      if (count > 0) ...[
-                        const SizedBox(width: 8),
-                        Text('$count', style: GoogleFonts.inter(color: textDark, fontWeight: FontWeight.w600)),
-                      ],
-                    ],
-                  ),
-                );
-              },
-            ),
-            const SizedBox(width: 40),
-            Icon(Icons.chat_bubble_outline, color: textDark.withOpacity(0.7), size: 26),
-            const SizedBox(width: 40),
-            Icon(Icons.share_outlined, color: textDark.withOpacity(0.7), size: 26),
-          ],
-        ),
-        Row(
-          children: [
-            if (_canEditOrDelete) ...[
-              IconButton(
-                icon: Icon(Icons.edit, color: primaryRed),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => EditEventScreen(eventId: eventId, event: widget.event)),
-                  );
-                },
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                onPressed: () {
-                  // your delete dialog logic here (unchanged)
-                },
-              ),
-            ],
-            Icon(Icons.bookmark_border, color: textDark.withOpacity(0.7), size: 26),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCommentsSection(Color textDark, Color textSecondary) {
+  Widget _buildComments() {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore
           .collection('events')
@@ -478,71 +644,105 @@ class _EventScreenState extends State<EventScreen> {
           .orderBy('createdAt', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+        if (snapshot.connectionState ==
+            ConnectionState.waiting) {
+          return const Center(
+              child: CircularProgressIndicator(
+                  color: AppColors.brandRed));
         }
-        if (snapshot.hasError) {
-          return Text('Error loading comments', style: TextStyle(color: Colors.red[300]));
-        }
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+        if (!snapshot.hasData ||
+            snapshot.data!.docs.isEmpty) {
           return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 40),
+            padding: const EdgeInsets.symmetric(vertical: 24),
             child: Center(
-              child: Text(
-                'No comments yet. Be the first to share.',
-                style: GoogleFonts.inter(color: textSecondary, fontSize: 16),
-              ),
+              child: Text('No comments yet. Be the first!',
+                  style: GoogleFonts.inter(
+                      color: AppColors.mutedText,
+                      fontSize: 14)),
             ),
           );
         }
 
-        final comments = snapshot.data!.docs;
-
-        return ListView.builder(
+        return ListView.separated(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          itemCount: comments.length,
+          itemCount: snapshot.data!.docs.length,
+          separatorBuilder: (_, __) =>
+              const Divider(color: AppColors.borderSubtle),
           itemBuilder: (context, i) {
-            final c = comments[i].data() as Map<String, dynamic>;
+            final c = snapshot.data!.docs[i].data()
+                as Map<String, dynamic>;
+            final commentId = snapshot.data!.docs[i].id;
             final ts = c['createdAt'] as Timestamp?;
-            final time = ts != null ? DateFormat('MMM dd • HH:mm').format(ts.toDate()) : 'recent';
-
-            final name = c['userName'] as String? ?? 'Anonymous';
-            final photo = c['userPhoto'] as String?;
+            final time = ts != null
+                ? DateFormat('MMM dd • HH:mm')
+                    .format(ts.toDate())
+                : '';
+            final name =
+                c['userName']?.toString() ?? 'Anonymous';
+            final photo = c['userPhoto']?.toString();
+            final isOwner =
+                c['userId'] == _auth.currentUser?.uid;
 
             return Padding(
-              padding: const EdgeInsets.only(bottom: 24),
+              padding: const EdgeInsets.symmetric(vertical: 8),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   CircleAvatar(
-                    radius: 22,
-                    backgroundColor: Colors.grey.shade200,
-                    backgroundImage: photo != null ? NetworkImage(photo) : null,
+                    radius: 20,
+                    backgroundColor: AppColors.borderSubtle,
+                    backgroundImage: photo != null
+                        ? NetworkImage(photo)
+                        : null,
                     child: photo == null
-                        ? Text(name[0].toUpperCase(), style: TextStyle(color: textDark))
+                        ? Text(name[0].toUpperCase(),
+                            style: GoogleFonts.inter(
+                                color: AppColors.brandRed,
+                                fontWeight: FontWeight.w600))
                         : null,
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Text(
-                              name,
-                              style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: textDark),
+                        Row(children: [
+                          Text(name,
+                              style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                  color: AppColors.darkText)),
+                          const SizedBox(width: 8),
+                          Text(time,
+                              style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  color: AppColors.mutedText)),
+                          if (isOwner) ...[
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: () async {
+                                await _firestore
+                                    .collection('events')
+                                    .doc(eventId)
+                                    .collection('comments')
+                                    .doc(commentId)
+                                    .delete();
+                              },
+                              child: const Icon(
+                                  Icons.delete_outline,
+                                  size: 16,
+                                  color: AppColors.mutedText),
                             ),
-                            const SizedBox(width: 12),
-                            Text(time, style: GoogleFonts.inter(color: textSecondary, fontSize: 13)),
                           ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          c['text'] ?? '',
-                          style: GoogleFonts.inter(color: textSecondary, height: 1.5),
-                        ),
+                        ]),
+                        const SizedBox(height: 4),
+                        Text(c['text']?.toString() ?? '',
+                            style: GoogleFonts.inter(
+                                fontSize: 13,
+                                color: AppColors.darkText,
+                                height: 1.5)),
                       ],
                     ),
                   ),
@@ -554,55 +754,42 @@ class _EventScreenState extends State<EventScreen> {
       },
     );
   }
-}
 
-class _ElegantChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  const _ElegantChip({required this.icon, required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _heroBadge(String label, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(
+          horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+        color: color,
+        borderRadius: BorderRadius.circular(6),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: 8),
-          Text(label, style: GoogleFonts.inter(color: color, fontSize: 14)),
-        ],
-      ),
+      child: Text(label,
+          style: GoogleFonts.inter(
+              color: Colors.white,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5)),
     );
   }
-}
 
-class _FeatureRow extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  final Color color;
-
-  const _FeatureRow({required this.icon, required this.text, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: 12),
-          Text(text, style: GoogleFonts.inter(color: const Color(0xFF5F6368))),
-        ],
+  Widget _infoChip(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.cardWhite,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.borderSubtle),
       ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 13, color: AppColors.brandRed),
+        const SizedBox(width: 6),
+        Text(label,
+            style: GoogleFonts.inter(
+                fontSize: 12,
+                color: AppColors.darkText,
+                fontWeight: FontWeight.w500)),
+      ]),
     );
   }
 }

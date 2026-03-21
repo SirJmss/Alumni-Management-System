@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+import 'package:alumni/core/constants/app_colors.dart';
 
 class AnnouncementDetailScreen extends StatelessWidget {
   final String title;
@@ -17,64 +20,73 @@ class AnnouncementDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFE6D3AE),
+      backgroundColor: AppColors.softWhite,
       appBar: AppBar(
-        title: const Text(
-          'Announcement Details',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-        ),
-        backgroundColor: const Color(0xFFE64646),
-        foregroundColor: Colors.white,
+        backgroundColor: AppColors.cardWhite,
         elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.darkText),
+        title: Text('Announcement',
+            style: GoogleFonts.cormorantGaramond(fontSize: 22)),
         centerTitle: true,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF2D2D2D),
-                    ),
+            if (important)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.brandRed,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  'IMPORTANT',
+                  style: GoogleFonts.inter(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1,
                   ),
                 ),
-                if (important)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE64646),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Text(
-                      'Important',
-                      style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-              ],
+              ),
+            Text(
+              title,
+              style: GoogleFonts.cormorantGaramond(
+                fontSize: 28,
+                fontWeight: FontWeight.w600,
+                color: AppColors.darkText,
+                height: 1.2,
+              ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+            Row(children: [
+              const Icon(Icons.access_time,
+                  size: 14, color: AppColors.mutedText),
+              const SizedBox(width: 6),
+              Text(
+                dateStr,
+                style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: AppColors.mutedText,
+                    fontStyle: FontStyle.italic),
+              ),
+            ]),
+            const SizedBox(height: 20),
+            const Divider(color: AppColors.borderSubtle),
+            const SizedBox(height: 20),
             Text(
               content,
-              style: TextStyle(fontSize: 16, height: 1.6, color: Colors.grey[800]),
+              style: GoogleFonts.inter(
+                fontSize: 15,
+                height: 1.7,
+                color: AppColors.darkText,
+              ),
             ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                Icon(Icons.calendar_today, size: 18, color: Colors.grey[700]),
-                const SizedBox(width: 8),
-                Text(
-                  dateStr,
-                  style: TextStyle(fontSize: 14, color: Colors.grey[700], fontStyle: FontStyle.italic),
-                ),
-              ],
-            ),
+            const SizedBox(height: 40),
           ],
         ),
       ),
