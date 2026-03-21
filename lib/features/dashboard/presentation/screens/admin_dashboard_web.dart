@@ -23,12 +23,12 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
   bool isLoading = true;
   String? errorMessage;
 
-  // Design Constants
-  final Color brandRed = const Color(0xFF991B1B);
-  final Color softWhite = const Color(0xFFFDFDFD);
-  final Color darkText = const Color(0xFF111827);
-  final Color mutedText = const Color(0xFF6B7280);
-  final Color borderSubtle = const Color(0xFFE5E7EB);
+  // Design Constants (aligned with other admin screens)
+  static const Color brandRed = Color(0xFF991B1B);
+  static const Color softWhite = Color(0xFFFDFDFD);
+  static const Color darkText = Color(0xFF111827);
+  static const Color mutedText = Color(0xFF6B7280);
+  static const Color borderSubtle = Color(0xFFE5E7EB);
 
   @override
   void initState() {
@@ -50,13 +50,14 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
       final results = await Future.wait([
         firestore.collection('users').where('status', whereIn: ['verified', 'active']).count().get(),
         firestore.collection('users').where('status', isEqualTo: 'pending').count().get(),
-        firestore.collection('chapters').where('active', isEqualTo: true).count().get(),
-        firestore.collection('users').where('status', isEqualTo: 'pending').orderBy('createdAt', descending: true).get(),
+        firestore.collection('chapters').where('status', isEqualTo: 'active').count().get(),
+        firestore.collection('users').where('status', isEqualTo: 'pending').orderBy('createdAt', descending: true).limit(5).get(),
         firestore.collection('events').orderBy('createdAt', descending: true).limit(4).get(),
         firestore.collection('announcements').orderBy('publishedAt', descending: true).limit(4).get(),
-        firestore.collection('users').orderBy('updatedAt', descending: true).limit(8).get(),
+        firestore.collection('users').orderBy('lastLogin', descending: true).limit(8).get(),
       ]);
 
+      final pendingUsersSnap = results[3] as QuerySnapshot;
       final eventsSnap = results[4] as QuerySnapshot;
       final announcementsSnap = results[5] as QuerySnapshot;
       final userActivitySnap = results[6] as QuerySnapshot;
@@ -67,13 +68,14 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
           pendingVerifications = (results[1] as AggregateQuerySnapshot).count ?? 0;
           activeChapters = (results[2] as AggregateQuerySnapshot).count ?? 0;
 
-          pendingUsers = (results[3] as QuerySnapshot).docs.map((doc) {
+          pendingUsers = pendingUsersSnap.docs.map((doc) {
             final data = doc.data() as Map<String, dynamic>;
             return {
               'id': doc.id,
               'name': data['name'] as String? ?? data['fullName'] as String? ?? 'Unknown',
               'degree': '${data['degree'] as String? ?? ''} ${data['batchYear'] as String? ?? ''}'.trim(),
               'submitted': _formatTimestamp(data['createdAt'] as Timestamp?),
+              'photoUrl': data['photoUrl'] as String?,
             };
           }).toList();
 
@@ -95,7 +97,7 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
                 'title': data['title'] as String? ?? 'Announcement',
                 'desc': data['content'] as String? ?? 'No content',
                 'time': _formatTimestamp(data['publishedAt'] as Timestamp?),
-                'isUrgent': (data['priority'] as String?) == 'high',
+                'isUrgent': data['important'] as bool? ?? false,
               };
             }),
           ]..sort((a, b) => (b['time'] as String).compareTo(a['time'] as String));
@@ -113,6 +115,7 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
               'name': name,
               'action': lastLogin == latest ? 'Logged in' : 'Profile updated',
               'time': _formatTimestamp(latest),
+              'photoUrl': data['photoUrl'] as String?,
             };
           }).toList();
 
@@ -151,14 +154,14 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('User verified'), backgroundColor: Colors.green),
+          const SnackBar(content: Text('User verified successfully'), backgroundColor: Colors.green),
         );
         _loadAdminData();
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error verifying user: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -175,14 +178,14 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('User denied'), backgroundColor: Colors.orange),
+          const SnackBar(content: Text('Verification denied'), backgroundColor: Colors.orange),
         );
         _loadAdminData();
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Error denying user: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -202,49 +205,66 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
         onRefresh: _loadAdminData,
         color: brandRed,
         child: isLoading
-            ? const Center(child: CircularProgressIndicator(color: Color(0xFF991B1B)))
-            : Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Sidebar
-                  Container(
-                    width: sidebarWidth,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border(right: BorderSide(color: borderSubtle, width: 0.5)),
+            ? const Center(child: CircularProgressIndicator(color: brandRed))
+            : errorMessage != null
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.error_outline, size: 80, color: Colors.red),
+                        const SizedBox(height: 16),
+                        Text(errorMessage!, style: GoogleFonts.inter(fontSize: 16, color: Colors.red)),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: _loadAdminData,
+                          style: ElevatedButton.styleFrom(backgroundColor: brandRed),
+                          child: const Text('Retry', style: TextStyle(color: Colors.white)),
+                        ),
+                      ],
                     ),
-                    child: _buildSidebar(),
-                  ),
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Sidebar
+                      Container(
+                        width: sidebarWidth,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          border: Border(right: BorderSide(color: borderSubtle, width: 0.5)),
+                        ),
+                        child: _buildSidebar(),
+                      ),
 
-                  // Main content
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(minHeight: size.height),
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: horizontalPadding,
-                            vertical: verticalPadding,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildHeader(),
-                              const SizedBox(height: 40),
-                              _buildStatsGrid(),
-                              const SizedBox(height: 48),
-                              _buildMainContentSections(),
-                              const SizedBox(height: 48),
-                              _buildRecentActivity(),
-                              const SizedBox(height: 80),
-                            ],
+                      // Main content
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(minHeight: size.height),
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: horizontalPadding,
+                                vertical: verticalPadding,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _buildHeader(),
+                                  const SizedBox(height: 40),
+                                  _buildStatsGrid(),
+                                  const SizedBox(height: 48),
+                                  _buildMainContentSections(),
+                                  const SizedBox(height: 48),
+                                  _buildRecentActivity(),
+                                  const SizedBox(height: 80),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
       ),
     );
   }
@@ -301,7 +321,7 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
                   _SidebarItem(label: 'Event Planning', route: '/event_planning'),
                   _SidebarItem(label: 'Job Board Management', route: '/job_board_management'),
                   _SidebarItem(label: 'Growth Metrics', route: '/growth_metrics'),
-                   _SidebarItem(label: 'Announcement Management', route: '/announcement_management'),
+                  _SidebarItem(label: 'Announcement Management', route: '/announcement_management'),
                 ]),
               ],
             ),
@@ -381,19 +401,23 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Alumni Intelligence.',
+                    'Alumni Intelligence Dashboard',
                     style: GoogleFonts.cormorantGaramond(fontSize: 36, fontStyle: FontStyle.italic, fontWeight: FontWeight.w300),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'INSTITUTIONAL DATA FEED: LIVE',
+                    'LIVE INSTITUTIONAL OVERVIEW',
                     style: GoogleFonts.inter(fontSize: 10, letterSpacing: 2, color: mutedText),
                   ),
                   const SizedBox(height: 24),
-                  Wrap(spacing: 16, runSpacing: 16, children: [
-                    _buildActionButton('DONATION REPORTS', false),
-                    _buildActionButton('BROADCAST NEWSLETTER', true),
-                  ]),
+                  Wrap(
+                    spacing: 16,
+                    runSpacing: 16,
+                    children: [
+                      _buildActionButton('View Donation Reports', false),
+                      _buildActionButton('Send Newsletter', true),
+                    ],
+                  ),
                 ],
               )
             : Row(
@@ -404,20 +428,23 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Alumni Intelligence.',
+                        'Alumni Intelligence Dashboard',
                         style: GoogleFonts.cormorantGaramond(fontSize: 44, fontStyle: FontStyle.italic, fontWeight: FontWeight.w300),
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'INSTITUTIONAL DATA FEED: LIVE',
+                        'LIVE INSTITUTIONAL OVERVIEW',
                         style: GoogleFonts.inter(fontSize: 10, letterSpacing: 2, color: mutedText),
                       ),
                     ],
                   ),
-                  Wrap(spacing: 16, children: [
-                    _buildActionButton('DONATION REPORTS', false),
-                    _buildActionButton('BROADCAST NEWSLETTER', true),
-                  ]),
+                  Wrap(
+                    spacing: 16,
+                    children: [
+                      _buildActionButton('View Donation Reports', false),
+                      _buildActionButton('Send Newsletter', true),
+                    ],
+                  ),
                 ],
               );
       },
@@ -425,19 +452,19 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
   }
 
   Widget _buildActionButton(String text, bool primary) {
-    final style = primary
-        ? ElevatedButton.styleFrom(backgroundColor: brandRed, padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16))
-        : OutlinedButton.styleFrom(side: BorderSide(color: borderSubtle), padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16));
-
-    // Choose the appropriate button type explicitly rather than trying to
-    // invoke a constructor through a ternary expression. The previous code
-    // caused an analyzer error because the expression returned a Type, not a
-    // callable constructor.
     if (primary) {
       return ElevatedButton(
-        onPressed: () {},
-        style: style.copyWith(
-            shape: const WidgetStatePropertyAll(RoundedRectangleBorder())),
+        onPressed: () {
+          // TODO: Implement newsletter broadcast
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Newsletter feature coming soon')),
+          );
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: brandRed,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          shape: const RoundedRectangleBorder(),
+        ),
         child: Text(
           text,
           style: GoogleFonts.inter(
@@ -450,9 +477,17 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
       );
     } else {
       return OutlinedButton(
-        onPressed: () {},
-        style: style.copyWith(
-            shape: const WidgetStatePropertyAll(RoundedRectangleBorder())),
+        onPressed: () {
+          // TODO: Implement donation reports
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Donation reports coming soon')),
+          );
+        },
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: borderSubtle),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          shape: const RoundedRectangleBorder(),
+        ),
         child: Text(
           text,
           style: GoogleFonts.inter(
@@ -482,30 +517,41 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
           mainAxisSpacing: 20,
           childAspectRatio: count >= 3 ? 1.65 : 1.9,
           children: [
-            _buildStatCard('Total Alumni Verified', totalAlumni.toString(), '+48 new graduates'),
-            _buildStatCard('Engagement Rate', '24.8%', 'Active in mentorship', Colors.green),
-            _buildStatCard('Pending Verifications', pendingVerifications.toString(), 'Requires ID review', brandRed),
-            _buildStatCard('Endowment Growth', '+8.2%', 'Year-to-date', Colors.green),
+            _buildStatCard(Icons.people_outline, 'Total Verified Alumni', totalAlumni.toString(), '+48 recent'),
+            _buildStatCard(Icons.trending_up, 'Engagement Rate', '24.8%', 'Active in mentorship', Colors.green),
+            _buildStatCard(Icons.hourglass_empty, 'Pending Verifications', pendingVerifications.toString(), 'Requires review', brandRed),
+            _buildStatCard(Icons.attach_money, 'Endowment Growth', '+8.2%', 'Year-to-date', Colors.green),
           ],
         );
       },
     );
   }
 
-  Widget _buildStatCard(String title, String value, String subtitle, [Color? color]) {
+  Widget _buildStatCard(IconData icon, String title, String value, String subtitle, [Color? accent]) {
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(color: Colors.white, border: Border.all(color: borderSubtle)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: borderSubtle),
+        borderRadius: BorderRadius.circular(8),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(title.toUpperCase(), style: GoogleFonts.inter(fontSize: 10, letterSpacing: 1.5, color: mutedText, fontWeight: FontWeight.bold)),
+          Row(
+            children: [
+              Icon(icon, color: accent ?? mutedText, size: 20),
+              const SizedBox(width: 8),
+              Text(title.toUpperCase(), style: GoogleFonts.inter(fontSize: 10, letterSpacing: 1.5, color: mutedText, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 16),
           FittedBox(
             fit: BoxFit.scaleDown,
-            child: Text(value, style: GoogleFonts.cormorantGaramond(fontSize: 38, fontWeight: FontWeight.w300)),
+            child: Text(value, style: GoogleFonts.cormorantGaramond(fontSize: 42, fontWeight: FontWeight.w300, color: accent ?? darkText)),
           ),
-          Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: color ?? mutedText)),
+          const SizedBox(height: 8),
+          Text(subtitle, style: GoogleFonts.inter(fontSize: 11, color: mutedText)),
         ],
       ),
     );
@@ -552,7 +598,7 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
               ),
             ),
             Text(
-              'FULL DIRECTORY',
+              'VIEW FULL DIRECTORY',
               style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: brandRed, letterSpacing: 1.5),
             ),
           ],
@@ -563,7 +609,12 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
           child: pendingUsers.isEmpty
               ? Padding(
                   padding: const EdgeInsets.all(32),
-                  child: Center(child: Text('No pending verifications at this time.', style: GoogleFonts.inter(color: mutedText, fontSize: 15))),
+                  child: Center(
+                    child: Text(
+                      'No pending verifications at this time.',
+                      style: GoogleFonts.inter(color: mutedText, fontSize: 15),
+                    ),
+                  ),
                 )
               : SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -586,6 +637,51 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
     );
   }
 
+  DataRow _buildDataRow(Map<String, dynamic> user) {
+    return DataRow(cells: [
+      DataCell(
+        Row(
+          children: [
+            CircleAvatar(
+              radius: 20,
+              backgroundImage: user['photoUrl'] != null ? NetworkImage(user['photoUrl']) : null,
+              backgroundColor: brandRed.withOpacity(0.1),
+              child: user['photoUrl'] == null
+                  ? Text(user['name']?[0] ?? '?', style: TextStyle(color: brandRed))
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(user['name'] ?? '—', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600)),
+                Text('Pending Review', style: GoogleFonts.inter(fontSize: 10, color: mutedText)),
+              ],
+            ),
+          ],
+        ),
+      ),
+      DataCell(Text(user['degree'] ?? '—', style: GoogleFonts.inter(fontSize: 12))),
+      DataCell(Text(user['submitted'] ?? '—', style: GoogleFonts.inter(fontSize: 12, color: mutedText))),
+      DataCell(
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextButton(
+              onPressed: () => _verifyUser(user['id']),
+              child: Text('VERIFY', style: GoogleFonts.inter(fontSize: 11, color: brandRed, fontWeight: FontWeight.bold)),
+            ),
+            TextButton(
+              onPressed: () => _denyUser(user['id']),
+              child: Text('DENY', style: GoogleFonts.inter(fontSize: 11, color: mutedText)),
+            ),
+          ],
+        ),
+      ),
+    ]);
+  }
+
   Widget _buildNetworkPulse() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -606,64 +702,6 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
     );
   }
 
-  Widget _buildRecentActivity() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Recent User Activity', style: GoogleFonts.cormorantGaramond(fontSize: 24)),
-        const SizedBox(height: 16),
-        if (recentUserActivity.isEmpty)
-          Text('No recent user activity.', style: GoogleFonts.inter(color: mutedText))
-        else
-          ...recentUserActivity.map((log) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Row(
-                  children: [
-                    Icon(Icons.person_outline_rounded, color: mutedText, size: 18),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        '${log['name']} – ${log['action']}',
-                        style: GoogleFonts.inter(fontSize: 14, color: darkText),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Text(log['time'], style: GoogleFonts.inter(fontSize: 12, color: mutedText)),
-                  ],
-                ),
-              )),
-      ],
-    );
-  }
-
-  DataRow _buildDataRow(Map<String, dynamic> user) {
-    return DataRow(cells: [
-      DataCell(Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(user['name'] ?? '—', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600)),
-          Text('Pending Review', style: GoogleFonts.inter(fontSize: 10, color: mutedText)),
-        ],
-      )),
-      DataCell(Text(user['degree'] ?? '—', style: GoogleFonts.inter(fontSize: 12))),
-      DataCell(Text(user['submitted'] ?? '—', style: GoogleFonts.inter(fontSize: 12, color: mutedText))),
-      DataCell(Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextButton(
-            onPressed: () => _verifyUser(user['id']),
-            child: Text('VERIFY', style: GoogleFonts.inter(fontSize: 11, color: brandRed, fontWeight: FontWeight.bold)),
-          ),
-          TextButton(
-            onPressed: () => _denyUser(user['id']),
-            child: Text('DENY', style: GoogleFonts.inter(fontSize: 11, color: mutedText)),
-          ),
-        ],
-      )),
-    ]);
-  }
-
   Widget _buildActivityItem(String type, String title, String desc, String time, bool isUrgent) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
@@ -678,6 +716,8 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
               children: [
                 Text(type.toUpperCase(), style: GoogleFonts.inter(fontSize: 10, letterSpacing: 1.5, color: mutedText, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 4),
+                Text(title, style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
                 Text(desc, style: GoogleFonts.inter(fontSize: 13, color: darkText), maxLines: 2, overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 4),
                 Text(time, style: GoogleFonts.inter(fontSize: 11, color: mutedText)),
@@ -686,6 +726,40 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildRecentActivity() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Recent User Activity', style: GoogleFonts.cormorantGaramond(fontSize: 24)),
+        const SizedBox(height: 16),
+        if (recentUserActivity.isEmpty)
+          Text('No recent user activity.', style: GoogleFonts.inter(color: mutedText))
+        else
+          ...recentUserActivity.map((log) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundColor: brandRed.withOpacity(0.1),
+                      child: Text(log['name']?[0] ?? '?', style: TextStyle(color: brandRed)),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '${log['name']} – ${log['action']}',
+                        style: GoogleFonts.inter(fontSize: 14, color: darkText),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Text(log['time'], style: GoogleFonts.inter(fontSize: 12, color: mutedText)),
+                  ],
+                ),
+              )),
+      ],
     );
   }
 
