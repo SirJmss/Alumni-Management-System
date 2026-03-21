@@ -772,14 +772,16 @@ class _EventScreenState extends State<EventScreen> {
     );
   }
 
-  Widget _infoChip(IconData icon, String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.cardWhite,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.borderSubtle),
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 12),
+          Text(text, style: GoogleFonts.inter(color: color, fontWeight: FontWeight.w600)),
+        ],
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, size: 13, color: AppColors.brandRed),
