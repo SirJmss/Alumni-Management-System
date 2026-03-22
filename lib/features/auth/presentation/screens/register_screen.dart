@@ -1,452 +1,1227 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:alumni/core/constants/app_colors.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
 
   @override
-  State<RegisterScreen> createState() => _RegisterScreenState();
+  State<RegisterScreen> createState() =>
+      _RegisterScreenState();
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _firstNameController = TextEditingController();
-  final _lastNameController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
+  int _step = 0; // 0 = account, 1 = personal, 2 = confirm
 
+  // ─── Account info ───
+  final _firstNameCtrl = TextEditingController();
+  final _lastNameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  final _confirmPasswordCtrl = TextEditingController();
+
+  // ─── Personal info ───
+  final _batchCtrl = TextEditingController();
+  final _courseCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _locationCtrl = TextEditingController();
+  final _occupationCtrl = TextEditingController();
+  final _companyCtrl = TextEditingController();
+  final _aboutCtrl = TextEditingController();
+
+  bool _obscure = true;
+  bool _obscureConfirm = true;
+  bool _agreeNda = false;
   bool _isLoading = false;
-  bool _obscurePassword = true;
-  bool _obscureConfirmPassword = true;
-  bool _acknowledgeNDA = false;
+
+  final _steps = [
+    'Account',
+    'Personal Info',
+    'Review',
+  ];
 
   @override
   void dispose() {
-    _firstNameController.dispose();
-    _lastNameController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
+    _firstNameCtrl.dispose();
+    _lastNameCtrl.dispose();
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    _confirmPasswordCtrl.dispose();
+    _batchCtrl.dispose();
+    _courseCtrl.dispose();
+    _phoneCtrl.dispose();
+    _locationCtrl.dispose();
+    _occupationCtrl.dispose();
+    _companyCtrl.dispose();
+    _aboutCtrl.dispose();
     super.dispose();
   }
 
-Future<void> _register() async {
-  if (!_formKey.currentState!.validate()) return;
-  if (!_acknowledgeNDA) {
+  void _showSnackBar(String msg,
+      {required bool isError}) {
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Please acknowledge the Non-Disclosure Agreement"),
-        backgroundColor: Colors.red,
+      SnackBar(
+        content: Text(msg, style: GoogleFonts.inter()),
+        backgroundColor:
+            isError ? Colors.red : Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(12),
       ),
     );
-    return;
   }
 
-  setState(() => _isLoading = true);
+  bool _validateStep0() {
+    final firstName = _firstNameCtrl.text.trim();
+    final lastName = _lastNameCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
+    final password = _passwordCtrl.text;
+    final confirm = _confirmPasswordCtrl.text;
 
-  try {
-    final auth = FirebaseAuth.instance;
-    final firestore = FirebaseFirestore.instance;
+    if (firstName.isEmpty || lastName.isEmpty) {
+      _showSnackBar('First and last name are required',
+          isError: true);
+      return false;
+    }
+    if (email.isEmpty ||
+        !RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
+            .hasMatch(email)) {
+      _showSnackBar('Enter a valid email address',
+          isError: true);
+      return false;
+    }
+    if (password.length < 8) {
+      _showSnackBar(
+          'Password must be at least 8 characters',
+          isError: true);
+      return false;
+    }
+    if (!RegExp(r'[A-Z]').hasMatch(password)) {
+      _showSnackBar(
+          'Password must contain at least one uppercase letter',
+          isError: true);
+      return false;
+    }
+    if (!RegExp(r'[0-9]').hasMatch(password)) {
+      _showSnackBar(
+          'Password must contain at least one number',
+          isError: true);
+      return false;
+    }
+    if (password != confirm) {
+      _showSnackBar('Passwords do not match',
+          isError: true);
+      return false;
+    }
+    return true;
+  }
 
-    // 1. Create user account
-    final credential = await auth.createUserWithEmailAndPassword(
-      email: _emailController.text.trim(),
-      password: _passwordController.text.trim(),
-    );
+  bool _validateStep1() {
+    if (_batchCtrl.text.trim().isEmpty) {
+      _showSnackBar('Batch year is required',
+          isError: true);
+      return false;
+    }
+    final batch = int.tryParse(_batchCtrl.text.trim());
+    if (batch == null ||
+        batch < 1950 ||
+        batch > DateTime.now().year) {
+      _showSnackBar(
+          'Enter a valid batch year (e.g. 2015)',
+          isError: true);
+      return false;
+    }
+    if (_courseCtrl.text.trim().isEmpty) {
+      _showSnackBar('Course / program is required',
+          isError: true);
+      return false;
+    }
+    return true;
+  }
 
-    final user = credential.user;
-    if (user == null) throw Exception("Registration failed - no user returned");
+  Future<void> _register() async {
+    if (!_agreeNda) {
+      _showSnackBar(
+          'Please acknowledge the agreement to proceed',
+          isError: true);
+      return;
+    }
 
-    // 2. Update display name
-    final fullName = '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}';
-    await user.updateDisplayName(fullName);
+    setState(() => _isLoading = true);
 
-// 3. Save user profile with pending status
-await firestore.collection('users').doc(user.uid).set({
-  'uid': user.uid,
-  'firstName': _firstNameController.text.trim(),
-  'lastName': _lastNameController.text.trim(),
-  'name': fullName,
-  'email': user.email?.trim().toLowerCase(),
-  'createdAt': FieldValue.serverTimestamp(),
-  'updatedAt': FieldValue.serverTimestamp(),
-  'lastLogin': FieldValue.serverTimestamp(),
+    try {
+      final credential = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(
+        email: _emailCtrl.text.trim(),
+        password: _passwordCtrl.text.trim(),
+      );
 
-  // ────────────────────────────────────────────────
-  // Changed: automatically set role = "alumni"
-  // status remains "pending_review" → blocks login until approved
-  // ────────────────────────────────────────────────
-  'role': 'alumni',             // ← NEW DEFAULT
-  'status': 'pending',   // keeps approval flow
-});
+      final user = credential.user;
+      if (user == null) throw Exception('No user returned');
 
-    if (!mounted) return;
+      final fullName =
+          '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
+      await user.updateDisplayName(fullName);
 
-    // 4. Success dialog and redirect
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Access Request Submitted'),
-        content: const Text(
-          'Your application has been received.\n\n'
-          'Our committee will review your profile.\n'
-          'You will be notified via email once approved.\n\n'
-          'Thank you for your patience.',
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .set({
+        'uid': user.uid,
+        'firstName': _firstNameCtrl.text.trim(),
+        'lastName': _lastNameCtrl.text.trim(),
+        'name': fullName,
+        'email': user.email?.trim().toLowerCase(),
+        'phone': _phoneCtrl.text.trim(),
+        'location': _locationCtrl.text.trim(),
+        'batch': _batchCtrl.text.trim(),
+        'batchYear': int.tryParse(_batchCtrl.text.trim()),
+        'course': _courseCtrl.text.trim(),
+        'occupation': _occupationCtrl.text.trim(),
+        'company': _companyCtrl.text.trim(),
+        'about': _aboutCtrl.text.trim(),
+        'role': 'alumni',
+        'status': 'pending',
+        'verificationStatus': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'lastLogin': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16)),
+          title: Row(children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.green.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check,
+                  color: Colors.green, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Text('Application Submitted',
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16)),
+          ]),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Your application has been received successfully.',
+                style: GoogleFonts.inter(
+                    fontSize: 14, height: 1.5),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.softWhite,
+                  borderRadius:
+                      BorderRadius.circular(8),
+                  border: Border.all(
+                      color: AppColors.borderSubtle),
+                ),
+                child: Column(
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
+                  children: [
+                    _reviewRow(
+                        'Name', fullName),
+                    _reviewRow('Batch',
+                        _batchCtrl.text.trim()),
+                    _reviewRow('Course',
+                        _courseCtrl.text.trim()),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Our committee will review your profile and notify you via email once approved.',
+                style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: AppColors.mutedText,
+                    height: 1.5),
+              ),
+            ],
+          ),
+          actions: [
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Navigator.pushReplacementNamed(
+                      context, '/login');
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.brandRed,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius:
+                          BorderRadius.circular(8)),
+                  elevation: 0,
+                ),
+                child: Text('Return to Sign In',
+                    style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pushReplacementNamed(context, '/login');
-            },
-            child: const Text('Return to Login'),
+      );
+    } on FirebaseAuthException catch (e) {
+      String msg;
+      switch (e.code) {
+        case 'email-already-in-use':
+          msg = 'This email is already registered.';
+          break;
+        case 'weak-password':
+          msg = 'Password is too weak.';
+          break;
+        case 'invalid-email':
+          msg = 'Invalid email address.';
+          break;
+        default:
+          msg = e.message ?? 'Registration failed';
+      }
+      _showSnackBar(msg, isError: true);
+    } catch (e) {
+      _showSnackBar('Error: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Widget _reviewRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(children: [
+        SizedBox(
+          width: 60,
+          child: Text(label,
+              style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: AppColors.mutedText,
+                  fontWeight: FontWeight.w500)),
+        ),
+        Expanded(
+          child: Text(
+              value.isEmpty ? '—' : value,
+              style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: AppColors.darkText,
+                  fontWeight: FontWeight.w600)),
+        ),
+      ]),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final w = MediaQuery.of(context).size.width;
+    final isMobile = w < 640;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0C0C0C),
+      body: Row(
+        children: [
+          // ─── Left panel ───
+          if (!isMobile)
+            Expanded(
+              child: Container(
+                color: const Color(0xFF0C0C0C),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.asset(
+                      'assets/images/gallery/building.jpg',
+                      fit: BoxFit.cover,
+                      opacity: const AlwaysStoppedAnimation(
+                          0.2),
+                      errorBuilder: (_, __, ___) =>
+                          const SizedBox(),
+                    ),
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                          colors: [
+                            const Color(0xFF0C0C0C)
+                                .withOpacity(0.3),
+                            const Color(0xFF0C0C0C),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(48),
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                        children: [
+                          GestureDetector(
+                            onTap: () =>
+                                Navigator.pop(context),
+                            child: MouseRegion(
+                              cursor: SystemMouseCursors
+                                  .click,
+                              child: Row(
+                                  mainAxisSize:
+                                      MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                        Icons
+                                            .arrow_back_ios_new_rounded,
+                                        color: Colors.white38,
+                                        size: 12),
+                                    const SizedBox(
+                                        width: 6),
+                                    Text('Back',
+                                        style:
+                                            GoogleFonts.inter(
+                                                fontSize: 12,
+                                                color: Colors
+                                                    .white38)),
+                                  ]),
+                            ),
+                          ),
+                          const Spacer(),
+                          Row(children: [
+                            Container(
+                                width: 20,
+                                height: 1,
+                                color: AppColors.brandRed),
+                            const SizedBox(width: 10),
+                            Text(
+                              'ST. CECILIA\'S  ·  ALUMNI',
+                              style: GoogleFonts.inter(
+                                  fontSize: 9,
+                                  letterSpacing: 3,
+                                  color: AppColors.brandRed,
+                                  fontWeight:
+                                      FontWeight.w700),
+                            ),
+                          ]),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Join the\nNetwork.',
+                            style:
+                                GoogleFonts.cormorantGaramond(
+                              fontSize: 64,
+                              fontWeight: FontWeight.w300,
+                              color: Colors.white,
+                              height: 1.0,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: 280,
+                            child: Text(
+                              'Apply for exclusive access to the St. Cecilia\'s alumni community.',
+                              style: GoogleFonts.inter(
+                                fontSize: 14,
+                                color: Colors.white
+                                    .withOpacity(0.4),
+                                height: 1.7,
+                                fontWeight: FontWeight.w300,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 32),
+                          // ─── Step indicators ───
+                          ...List.generate(
+                              _steps.length, (i) {
+                            final done = i < _step;
+                            final active = i == _step;
+                            return Padding(
+                              padding:
+                                  const EdgeInsets.only(
+                                      bottom: 12),
+                              child: Row(children: [
+                                AnimatedContainer(
+                                  duration: const Duration(
+                                      milliseconds: 300),
+                                  width: 20,
+                                  height: 20,
+                                  decoration: BoxDecoration(
+                                    color: done
+                                        ? AppColors.brandRed
+                                        : active
+                                            ? Colors.white
+                                            : Colors.white
+                                                .withOpacity(
+                                                    0.1),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: done ||
+                                              active
+                                          ? Colors.transparent
+                                          : Colors.white
+                                              .withOpacity(
+                                                  0.2),
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: done
+                                        ? const Icon(
+                                            Icons.check,
+                                            size: 11,
+                                            color:
+                                                Colors.white)
+                                        : Text(
+                                            '${i + 1}',
+                                            style: GoogleFonts.inter(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w700,
+                                                color: active
+                                                    ? AppColors.brandRed
+                                                    : Colors.white.withOpacity(0.3)),
+                                          ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(_steps[i],
+                                    style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        color: active
+                                            ? Colors.white
+                                            : done
+                                                ? Colors
+                                                    .white60
+                                                : Colors
+                                                    .white24,
+                                        fontWeight: active
+                                            ? FontWeight.w600
+                                            : FontWeight
+                                                .w300)),
+                              ]),
+                            );
+                          }),
+                          const SizedBox(height: 48),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // ─── Right panel ───
+          Container(
+            width: isMobile ? w : 520,
+            color: Colors.white,
+            child: SafeArea(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.symmetric(
+                    horizontal: isMobile ? 24 : 48,
+                    vertical: 40),
+                child: Column(
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
+                  children: [
+                    if (isMobile) ...[
+                      GestureDetector(
+                        onTap: () =>
+                            Navigator.pop(context),
+                        child: Row(
+                            mainAxisSize:
+                                MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                  Icons
+                                      .arrow_back_ios_new_rounded,
+                                  size: 12,
+                                  color: AppColors.mutedText),
+                              const SizedBox(width: 6),
+                              Text('Back',
+                                  style: GoogleFonts.inter(
+                                      fontSize: 12,
+                                      color: AppColors
+                                          .mutedText)),
+                            ]),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+
+                    // ─── Step progress (mobile) ───
+                    if (isMobile) ...[
+                      Row(
+                          children: List.generate(
+                              _steps.length, (i) {
+                        final done = i < _step;
+                        final active = i == _step;
+                        return Expanded(
+                          child: Row(children: [
+                            Expanded(
+                              child: AnimatedContainer(
+                                duration: const Duration(
+                                    milliseconds: 300),
+                                height: 2,
+                                color: done || active
+                                    ? AppColors.brandRed
+                                    : AppColors.borderSubtle,
+                              ),
+                            ),
+                            if (i < _steps.length - 1)
+                              const SizedBox(width: 4),
+                          ]),
+                        );
+                      })),
+                      const SizedBox(height: 8),
+                      Text(
+                          'Step ${_step + 1} of ${_steps.length}: ${_steps[_step]}',
+                          style: GoogleFonts.inter(
+                              fontSize: 11,
+                              color: AppColors.mutedText)),
+                      const SizedBox(height: 24),
+                    ],
+
+                    // ─── Step content ───
+                    AnimatedSwitcher(
+                      duration:
+                          const Duration(milliseconds: 300),
+                      transitionBuilder: (child, anim) =>
+                          FadeTransition(
+                              opacity: anim, child: child),
+                      child: _step == 0
+                          ? _buildStep0(key: const ValueKey(0))
+                          : _step == 1
+                              ? _buildStep1(key: const ValueKey(1))
+                              : _buildStep2(key: const ValueKey(2)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ],
       ),
     );
-
-    // Clear form
-    _firstNameController.clear();
-    _lastNameController.clear();
-    _emailController.clear();
-    _passwordController.clear();
-    _confirmPasswordController.clear();
-    setState(() => _acknowledgeNDA = false);
-  } on FirebaseAuthException catch (e) {
-    String message = e.message ?? 'Registration failed';
-    switch (e.code) {
-      case 'email-already-in-use':
-        message = 'This email is already registered.';
-        break;
-      case 'weak-password':
-        message = 'Password should be at least 6 characters.';
-        break;
-      case 'invalid-email':
-        message = 'Please enter a valid email.';
-        break;
-    }
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: Colors.red),
-      );
-    }
-  } catch (e) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("An error occurred: $e"), backgroundColor: Colors.red),
-      );
-    }
   }
 
-  if (mounted) setState(() => _isLoading = false);
-}
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 36.0),
-            child: Column(
-              children: [
-                const SizedBox(height: 60),
-
-                // Branding
-                const Text(
-                  'ALUMNI',
-                  style: TextStyle(
-                    fontSize: 52,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 6,
-                    color: Color(0xFF1A1A1A),
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'MEMBERSHIP APPLICATION',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: 4,
-                    color: Colors.grey.shade600,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-
-                const SizedBox(height: 8),
-                Container(
-                  height: 2,
-                  width: 120,
-                  color: const Color(0xFF9B1D1D),
-                ),
-
-                const SizedBox(height: 60),
-
-                // Form card
-                Container(
-                  constraints: const BoxConstraints(maxWidth: 460),
-                  padding: const EdgeInsets.fromLTRB(36, 40, 36, 48),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.07),
-                        blurRadius: 40,
-                        offset: const Offset(0, 16),
-                      ),
-                    ],
-                  ),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Create your profile',
-                          style: TextStyle(
-                            fontSize: 30,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF111111),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Join our curated community. Please provide your professional details for verification.',
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: Colors.grey.shade700,
-                            height: 1.5,
-                          ),
-                        ),
-                        const SizedBox(height: 40),
-
-                        // First & Last Name
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildTextField(
-                                label: 'FIRST NAME',
-                                controller: _firstNameController,
-                                hint: 'e.g. Julian',
-                                validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null,
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: _buildTextField(
-                                label: 'LAST NAME',
-                                controller: _lastNameController,
-                                hint: 'e.g. Vane',
-                                validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 32),
-
-                        // Email
-                        _buildTextField(
-                          label: 'PROFESSIONAL EMAIL',
-                          controller: _emailController,
-                          hint: 'e.g. concierge@maison.com',
-                          keyboardType: TextInputType.emailAddress,
-                          validator: (v) {
-                            if (v?.trim().isEmpty ?? true) return 'Required';
-                            if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(v!.trim())) {
-                              return 'Invalid email';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 32),
-
-                        // Password
-                        _buildPasswordField(
-                          label: 'SECURE PASSWORD',
-                          controller: _passwordController,
-                          obscure: _obscurePassword,
-                          onToggle: () => setState(() => _obscurePassword = !_obscurePassword),
-                          validator: (v) {
-                            if (v?.isEmpty ?? true) return 'Required';
-                            if (v!.length < 6) return 'Too short';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 32),
-
-                        // Confirm Password
-                        _buildPasswordField(
-                          label: 'CONFIRM PASSWORD',
-                          controller: _confirmPasswordController,
-                          obscure: _obscureConfirmPassword,
-                          onToggle: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
-                          validator: (v) {
-                            if (v?.isEmpty ?? true) return 'Required';
-                            if (v != _passwordController.text) return 'Passwords do not match';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 32),
-
-                        // NDA Checkbox
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: Checkbox(
-                                value: _acknowledgeNDA,
-                                activeColor: const Color(0xFF9B1D1D),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                                onChanged: (val) => setState(() => _acknowledgeNDA = val ?? false),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            const Expanded(
-                              child: Text(
-                                'I acknowledge the Non-Disclosure Agreement and understand that membership is subject to committee review.',
-                                style: TextStyle(fontSize: 14, color: Color(0xFF444444), height: 1.4),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 40),
-
-                        // Submit Button
-                        SizedBox(
-                          width: double.infinity,
-                          height: 56,
-                          child: ElevatedButton(
-                            onPressed: _isLoading ? null : _register,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF9B1D1D),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              elevation: 0,
-                            ),
-                            child: _isLoading
-                                ? const SizedBox(
-                                    height: 24,
-                                    width: 24,
-                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
-                                  )
-                                : const Text(
-                                    'REQUEST ACCESS',
-                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: 1.4),
-                                  ),
-                          ),
-                        ),
-                        const SizedBox(height: 32),
-
-                        // Sign in link
-                        Center(
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'Already have an account? ',
-                                style: TextStyle(color: Colors.grey.shade700, fontSize: 14),
-                              ),
-                              GestureDetector(
-                                onTap: () => Navigator.pop(context),
-                                child: const Text(
-                                  'Sign in',
-                                  style: TextStyle(
-                                    color: Color(0xFF9B1D1D),
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 60),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTextField({
-    required String label,
-    required TextEditingController controller,
-    required String hint,
-    TextInputType? keyboardType,
-    String? Function(String?)? validator,
-  }) {
+  // ─── Step 0: Account ───
+  Widget _buildStep0({Key? key}) {
     return Column(
+      key: key,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 1.0, color: Color(0xFF333333)),
-        ),
+        Text('Account Details',
+            style: GoogleFonts.cormorantGaramond(
+                fontSize: 36,
+                fontWeight: FontWeight.w400,
+                color: AppColors.darkText,
+                height: 1.0)),
         const SizedBox(height: 8),
-        TextFormField(
-          controller: controller,
-          keyboardType: keyboardType,
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: TextStyle(color: Colors.grey.shade400),
-            filled: true,
-            fillColor: const Color(0xFFFAFAFA),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        Text(
+            'Create your login credentials for the alumni portal.',
+            style: GoogleFonts.inter(
+                fontSize: 13,
+                color: AppColors.mutedText,
+                height: 1.5)),
+        const SizedBox(height: 32),
+
+        Row(children: [
+          Expanded(
+            child: _field(_firstNameCtrl, 'FIRST NAME',
+                'Juan'),
           ),
-          validator: validator,
+          const SizedBox(width: 12),
+          Expanded(
+            child: _field(
+                _lastNameCtrl, 'LAST NAME', 'Dela Cruz'),
+          ),
+        ]),
+        const SizedBox(height: 20),
+
+        _field(_emailCtrl, 'EMAIL ADDRESS',
+            'juan@email.com',
+            keyboardType: TextInputType.emailAddress),
+        const SizedBox(height: 20),
+
+        _passwordField(_passwordCtrl, 'PASSWORD',
+            obscure: _obscure,
+            onToggle: () =>
+                setState(() => _obscure = !_obscure)),
+        const SizedBox(height: 8),
+
+        // ─── Password strength hints ───
+        _passwordHints(_passwordCtrl.text),
+        const SizedBox(height: 20),
+
+        _passwordField(_confirmPasswordCtrl,
+            'CONFIRM PASSWORD',
+            obscure: _obscureConfirm,
+            onToggle: () => setState(
+                () => _obscureConfirm = !_obscureConfirm)),
+
+        const SizedBox(height: 32),
+
+        _stepButton('Next: Personal Info', () {
+          if (_validateStep0()) {
+            setState(() => _step = 1);
+          }
+        }),
+
+        const SizedBox(height: 20),
+        Center(
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('Already have an account? ',
+                style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppColors.mutedText)),
+            GestureDetector(
+              onTap: () =>
+                  Navigator.pushReplacementNamed(
+                      context, '/login'),
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: Text('Sign In',
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppColors.brandRed,
+                        fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ]),
         ),
       ],
     );
   }
 
-  Widget _buildPasswordField({
-    required String label,
-    required TextEditingController controller,
-    required bool obscure,
-    required VoidCallback onToggle,
-    String? Function(String?)? validator,
+  Widget _passwordHints(String password) {
+    final checks = [
+      ['At least 8 characters', password.length >= 8],
+      [
+        'One uppercase letter',
+        RegExp(r'[A-Z]').hasMatch(password)
+      ],
+      [
+        'One number',
+        RegExp(r'[0-9]').hasMatch(password)
+      ],
+    ];
+
+    return Column(
+      children: checks.map((c) {
+        final passed = c[1] as bool;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Row(children: [
+            Icon(
+              passed
+                  ? Icons.check_circle
+                  : Icons.circle_outlined,
+              size: 12,
+              color: passed ? Colors.green : AppColors.borderSubtle,
+            ),
+            const SizedBox(width: 6),
+            Text(c[0].toString(),
+                style: GoogleFonts.inter(
+                    fontSize: 11,
+                    color: passed
+                        ? Colors.green
+                        : AppColors.mutedText)),
+          ]),
+        );
+      }).toList(),
+    );
+  }
+
+  // ─── Step 1: Personal Info ───
+  Widget _buildStep1({Key? key}) {
+    return Column(
+      key: key,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Personal Information',
+            style: GoogleFonts.cormorantGaramond(
+                fontSize: 36,
+                fontWeight: FontWeight.w400,
+                color: AppColors.darkText,
+                height: 1.0)),
+        const SizedBox(height: 8),
+        Text(
+            'Help us verify your alumni status with your academic details.',
+            style: GoogleFonts.inter(
+                fontSize: 13,
+                color: AppColors.mutedText,
+                height: 1.5)),
+        const SizedBox(height: 32),
+
+        // ─── Academic ───
+        _sectionLabel('ACADEMIC DETAILS'),
+        const SizedBox(height: 12),
+
+        Row(children: [
+          Expanded(
+            child: _field(
+                _batchCtrl, 'BATCH YEAR *', 'e.g. 2015',
+                keyboardType: TextInputType.number),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _field(
+                _courseCtrl, 'COURSE / PROGRAM *',
+                'e.g. BS Nursing'),
+          ),
+        ]),
+
+        const SizedBox(height: 24),
+
+        // ─── Contact ───
+        _sectionLabel('CONTACT & LOCATION'),
+        const SizedBox(height: 12),
+
+        _field(_phoneCtrl, 'PHONE NUMBER',
+            'e.g. +63 912 345 6789',
+            keyboardType: TextInputType.phone),
+        const SizedBox(height: 16),
+        _field(_locationCtrl, 'CURRENT LOCATION',
+            'e.g. Cebu City, Philippines',
+            prefixIcon: Icons.location_on_outlined),
+
+        const SizedBox(height: 24),
+
+        // ─── Career ───
+        _sectionLabel('CAREER (OPTIONAL)'),
+        const SizedBox(height: 12),
+
+        _field(_occupationCtrl, 'JOB TITLE / OCCUPATION',
+            'e.g. Software Engineer'),
+        const SizedBox(height: 16),
+        _field(_companyCtrl, 'COMPANY / ORGANIZATION',
+            'e.g. Accenture Philippines',
+            prefixIcon: Icons.business_outlined),
+        const SizedBox(height: 16),
+        _field(_aboutCtrl, 'ABOUT YOURSELF',
+            'Share a brief intro about yourself...',
+            maxLines: 3),
+
+        const SizedBox(height: 32),
+
+        Row(children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: () => setState(() => _step = 0),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.mutedText,
+                side: const BorderSide(
+                    color: AppColors.borderSubtle),
+                padding: const EdgeInsets.symmetric(
+                    vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(6)),
+              ),
+              child: Text('Back',
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: _stepButton('Review Application', () {
+              if (_validateStep1()) {
+                setState(() => _step = 2);
+              }
+            }),
+          ),
+        ]),
+      ],
+    );
+  }
+
+  // ─── Step 2: Review + Submit ───
+  Widget _buildStep2({Key? key}) {
+    final fullName =
+        '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
+
+    return Column(
+      key: key,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Review Application',
+            style: GoogleFonts.cormorantGaramond(
+                fontSize: 36,
+                fontWeight: FontWeight.w400,
+                color: AppColors.darkText,
+                height: 1.0)),
+        const SizedBox(height: 8),
+        Text(
+            'Please review your information before submitting.',
+            style: GoogleFonts.inter(
+                fontSize: 13,
+                color: AppColors.mutedText,
+                height: 1.5)),
+        const SizedBox(height: 28),
+
+        // ─── Review card ───
+        _reviewSection('ACCOUNT', [
+          ['Full Name', fullName],
+          ['Email', _emailCtrl.text.trim()],
+        ]),
+        const SizedBox(height: 12),
+        _reviewSection('ACADEMIC', [
+          ['Batch Year', _batchCtrl.text.trim()],
+          ['Course', _courseCtrl.text.trim()],
+        ]),
+        if (_phoneCtrl.text.trim().isNotEmpty ||
+            _locationCtrl.text.trim().isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _reviewSection('CONTACT', [
+            if (_phoneCtrl.text.trim().isNotEmpty)
+              ['Phone', _phoneCtrl.text.trim()],
+            if (_locationCtrl.text.trim().isNotEmpty)
+              ['Location', _locationCtrl.text.trim()],
+          ]),
+        ],
+        if (_occupationCtrl.text.trim().isNotEmpty ||
+            _companyCtrl.text.trim().isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _reviewSection('CAREER', [
+            if (_occupationCtrl.text.trim().isNotEmpty)
+              ['Title', _occupationCtrl.text.trim()],
+            if (_companyCtrl.text.trim().isNotEmpty)
+              ['Company', _companyCtrl.text.trim()],
+          ]),
+        ],
+
+        const SizedBox(height: 24),
+
+        // ─── NDA checkbox ───
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.softWhite,
+            borderRadius: BorderRadius.circular(10),
+            border:
+                Border.all(color: AppColors.borderSubtle),
+          ),
+          child: Row(
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
+            children: [
+              GestureDetector(
+                onTap: () => setState(
+                    () => _agreeNda = !_agreeNda),
+                child: AnimatedContainer(
+                  duration:
+                      const Duration(milliseconds: 200),
+                  width: 18,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    color: _agreeNda
+                        ? AppColors.brandRed
+                        : Colors.white,
+                    border: Border.all(
+                      color: _agreeNda
+                          ? AppColors.brandRed
+                          : AppColors.borderSubtle,
+                      width: 1.5,
+                    ),
+                    borderRadius:
+                        BorderRadius.circular(4),
+                  ),
+                  child: _agreeNda
+                      ? const Icon(Icons.check,
+                          color: Colors.white, size: 12)
+                      : null,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'I acknowledge the Non-Disclosure Agreement and understand that membership is subject to committee review and approval.',
+                  style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: AppColors.darkText,
+                      height: 1.5),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 24),
+
+        Row(children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _isLoading
+                  ? null
+                  : () => setState(() => _step = 1),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.mutedText,
+                side: const BorderSide(
+                    color: AppColors.borderSubtle),
+                padding: const EdgeInsets.symmetric(
+                    vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(6)),
+              ),
+              child: Text('Back',
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: ElevatedButton(
+              onPressed:
+                  _isLoading ? null : _register,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.brandRed,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(
+                    vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(6)),
+                disabledBackgroundColor:
+                    AppColors.brandRed.withOpacity(0.6),
+              ),
+              child: _isLoading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2))
+                  : Text('SUBMIT APPLICATION',
+                      style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.5)),
+            ),
+          ),
+        ]),
+      ],
+    );
+  }
+
+  Widget _reviewSection(
+      String title, List<List<String>> rows) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.softWhite,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: GoogleFonts.inter(
+                  fontSize: 9,
+                  letterSpacing: 1.5,
+                  color: AppColors.brandRed,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          ...rows.map((row) => Padding(
+                padding:
+                    const EdgeInsets.only(bottom: 6),
+                child: Row(children: [
+                  SizedBox(
+                    width: 72,
+                    child: Text(row[0],
+                        style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: AppColors.mutedText)),
+                  ),
+                  Expanded(
+                    child: Text(
+                        row[1].isEmpty ? '—' : row[1],
+                        style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: AppColors.darkText,
+                            fontWeight:
+                                FontWeight.w600)),
+                  ),
+                ]),
+              )),
+        ],
+      ),
+    );
+  }
+
+  Widget _stepButton(
+      String label, VoidCallback onTap) {
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.brandRed,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(6)),
+        ),
+        child: Text(label.toUpperCase(),
+            style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5)),
+      ),
+    );
+  }
+
+  Widget _sectionLabel(String label) {
+    return Row(children: [
+      Container(
+          width: 16,
+          height: 1,
+          color: AppColors.brandRed),
+      const SizedBox(width: 8),
+      Text(label,
+          style: GoogleFonts.inter(
+              fontSize: 9,
+              letterSpacing: 2,
+              color: AppColors.brandRed,
+              fontWeight: FontWeight.w700)),
+    ]);
+  }
+
+  Widget _field(
+    TextEditingController ctrl,
+    String label,
+    String hint, {
+    int maxLines = 1,
+    TextInputType? keyboardType,
+    IconData? prefixIcon,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 1.0, color: Color(0xFF333333)),
-        ),
-        const SizedBox(height: 8),
+        Text(label,
+            style: GoogleFonts.inter(
+                fontSize: 9,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.mutedText)),
+        const SizedBox(height: 6),
         TextFormField(
-          controller: controller,
+          controller: ctrl,
+          maxLines: maxLines,
+          keyboardType: keyboardType,
+          style: GoogleFonts.inter(
+              fontSize: 13, color: AppColors.darkText),
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: GoogleFonts.inter(
+                color: AppColors.borderSubtle,
+                fontSize: 13),
+            prefixIcon: prefixIcon != null
+                ? Icon(prefixIcon,
+                    color: AppColors.mutedText, size: 18)
+                : null,
+            filled: true,
+            fillColor: AppColors.softWhite,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(
+                  color: AppColors.borderSubtle),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(
+                  color: AppColors.borderSubtle),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(
+                  color: AppColors.brandRed, width: 1.5),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14, vertical: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _passwordField(
+    TextEditingController ctrl,
+    String label, {
+    required bool obscure,
+    required VoidCallback onToggle,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: GoogleFonts.inter(
+                fontSize: 9,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.mutedText)),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: ctrl,
           obscureText: obscure,
+          style: GoogleFonts.inter(
+              fontSize: 13, color: AppColors.darkText),
+          onChanged: (_) => setState(() {}),
           decoration: InputDecoration(
             hintText: '••••••••••',
-            hintStyle: TextStyle(color: Colors.grey.shade400, letterSpacing: 3),
-            filled: true,
-            fillColor: const Color(0xFFFAFAFA),
+            hintStyle: GoogleFonts.inter(
+                color: AppColors.borderSubtle,
+                fontSize: 13,
+                letterSpacing: 3),
             suffixIcon: IconButton(
-              icon: Icon(obscure ? Icons.visibility_off : Icons.visibility, color: const Color(0xFF9B1D1D)),
+              icon: Icon(
+                  obscure
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  color: AppColors.mutedText,
+                  size: 18),
               onPressed: onToggle,
             ),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+            filled: true,
+            fillColor: AppColors.softWhite,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(
+                  color: AppColors.borderSubtle),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(
+                  color: AppColors.borderSubtle),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(
+                  color: AppColors.brandRed, width: 1.5),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14, vertical: 12),
           ),
-          validator: validator,
         ),
       ],
     );
