@@ -36,6 +36,13 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.13.1
+
+# ✅ This must be at the TOP LEVEL (no indentation)
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/gallery/logo.png"
 
 flutter:
   uses-material-design: true
