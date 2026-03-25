@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:alumni/core/constants/app_colors.dart';
+import 'package:alumni/features/admin/data/services/registry_service.dart';
+import 'package:alumni/features/admin/data/models/alumni_registry_models.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -13,7 +15,7 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  int _step = 0; // 0 = account, 1 = personal, 2 = confirm
+  int _step = 0;
 
   // ─── Account info ───
   final _firstNameCtrl = TextEditingController();
@@ -36,11 +38,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _agreeNda = false;
   bool _isLoading = false;
 
-  final _steps = [
-    'Account',
-    'Personal Info',
-    'Review',
-  ];
+  // ─── Registry check state ───
+  final _registryService = RegistryService();
+  bool _isCheckingRegistry = false;
+  MatchResult? _matchResult;
+  bool _registryChecked = false;
+
+  final _steps = ['Account', 'Personal Info', 'Review'];
 
   @override
   void dispose() {
@@ -74,6 +78,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ),
     );
   }
+
+  // ══════════════════════════════════════════
+  //  VALIDATION
+  // ══════════════════════════════════════════
 
   bool _validateStep0() {
     final firstName = _firstNameCtrl.text.trim();
@@ -143,6 +151,58 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return true;
   }
 
+  // ══════════════════════════════════════════
+  //  REGISTRY CHECK
+  // ══════════════════════════════════════════
+
+  Future<void> _checkRegistry() async {
+    if (!_validateStep1()) return;
+
+    setState(() {
+      _isCheckingRegistry = true;
+      _matchResult = null;
+      _registryChecked = false;
+    });
+
+    try {
+      final fullName =
+          '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
+
+      final result = await _registryService.checkUser(
+        fullName: fullName,
+        batch: _batchCtrl.text.trim(),
+        course: _courseCtrl.text.trim(),
+        email: _emailCtrl.text.trim(),
+      );
+
+      if (mounted) {
+        setState(() {
+          _matchResult = result;
+          _registryChecked = true;
+        });
+      }
+    } catch (e) {
+      // ─── If registry is empty or error, allow to proceed ───
+      if (mounted) {
+        setState(() {
+          _matchResult = const MatchResult(
+              isMatch: false,
+              confidence: 0,
+              record: null);
+          _registryChecked = true;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isCheckingRegistry = false);
+      }
+    }
+  }
+
+  // ══════════════════════════════════════════
+  //  REGISTER
+  // ══════════════════════════════════════════
+
   Future<void> _register() async {
     if (!_agreeNda) {
       _showSnackBar(
@@ -167,6 +227,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
           '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
       await user.updateDisplayName(fullName);
 
+      // ─── Determine status based on registry match ───
+      final isAutoVerified =
+          _matchResult?.isMatch == true &&
+              (_matchResult?.confidence ?? 0) >= 0.65;
+
+      final userStatus =
+          isAutoVerified ? 'active' : 'pending';
+      final verificationStatus =
+          isAutoVerified ? 'verified' : 'pending';
+
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
@@ -185,15 +255,37 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'company': _companyCtrl.text.trim(),
         'about': _aboutCtrl.text.trim(),
         'role': 'alumni',
-        'status': 'pending',
-        'verificationStatus': 'pending',
+        'status': userStatus,
+        'verificationStatus': verificationStatus,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
         'lastLogin': FieldValue.serverTimestamp(),
+        // ─── Registry match metadata ───
+        if (isAutoVerified) ...{
+          'verifiedAt': FieldValue.serverTimestamp(),
+          'verifiedBy': 'system_auto',
+          'registryMatchId':
+              _matchResult?.record?.id ?? '',
+          'matchConfidence':
+              _matchResult?.confidence ?? 0,
+        },
       });
+
+      // ─── Mark registry record as matched ───
+      if (isAutoVerified &&
+          _matchResult?.record?.id.isNotEmpty == true) {
+        await FirebaseFirestore.instance
+            .collection('alumni_registry')
+            .doc(_matchResult!.record!.id)
+            .update({
+          'isMatched': true,
+          'matchedUserId': user.uid,
+        });
+      }
 
       if (!mounted) return;
 
+      // ─── Show success dialog ───
       await showDialog(
         context: context,
         barrierDismissible: false,
@@ -205,28 +297,78 @@ class _RegisterScreenState extends State<RegisterScreen> {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.1),
+                color: isAutoVerified
+                    ? Colors.green.withOpacity(0.1)
+                    : Colors.blue.withOpacity(0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.check,
-                  color: Colors.green, size: 20),
+              child: Icon(
+                isAutoVerified
+                    ? Icons.verified_user
+                    : Icons.check,
+                color: isAutoVerified
+                    ? Colors.green
+                    : Colors.blue,
+                size: 20,
+              ),
             ),
             const SizedBox(width: 12),
-            Text('Application Submitted',
+            Expanded(
+              child: Text(
+                isAutoVerified
+                    ? 'Verified & Approved!'
+                    : 'Application Submitted',
                 style: GoogleFonts.inter(
                     fontWeight: FontWeight.w700,
-                    fontSize: 16)),
+                    fontSize: 16),
+              ),
+            ),
           ]),
           content: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
             children: [
+              // ─── Auto-verified banner ───
+              if (isAutoVerified)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin:
+                      const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.08),
+                    borderRadius:
+                        BorderRadius.circular(8),
+                    border: Border.all(
+                        color:
+                            Colors.green.withOpacity(0.3)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.auto_awesome,
+                        color: Colors.green, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Your identity was automatically verified against our alumni registry. You can log in immediately!',
+                        style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color:
+                                Colors.green.shade700,
+                            height: 1.4),
+                      ),
+                    ),
+                  ]),
+                ),
+
               Text(
-                'Your application has been received successfully.',
+                isAutoVerified
+                    ? 'Your account is now active.'
+                    : 'Your application has been received.',
                 style: GoogleFonts.inter(
                     fontSize: 14, height: 1.5),
               ),
               const SizedBox(height: 12),
+
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -240,18 +382,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   crossAxisAlignment:
                       CrossAxisAlignment.start,
                   children: [
-                    _reviewRow(
-                        'Name', fullName),
+                    _reviewRow('Name', fullName),
                     _reviewRow('Batch',
                         _batchCtrl.text.trim()),
                     _reviewRow('Course',
                         _courseCtrl.text.trim()),
+                    _reviewRow('Status',
+                        isAutoVerified
+                            ? '✓ Auto-Verified'
+                            : 'Pending Review'),
                   ],
                 ),
               ),
+
               const SizedBox(height: 12),
               Text(
-                'Our committee will review your profile and notify you via email once approved.',
+                isAutoVerified
+                    ? 'Welcome to the St. Cecilia\'s Alumni Network!'
+                    : 'Our committee will review your profile and notify you via email once approved.',
                 style: GoogleFonts.inter(
                     fontSize: 13,
                     color: AppColors.mutedText,
@@ -269,16 +417,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       context, '/login');
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.brandRed,
+                  backgroundColor: isAutoVerified
+                      ? Colors.green
+                      : AppColors.brandRed,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                       borderRadius:
                           BorderRadius.circular(8)),
                   elevation: 0,
                 ),
-                child: Text('Return to Sign In',
-                    style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w600)),
+                child: Text(
+                  isAutoVerified
+                      ? 'Sign In Now'
+                      : 'Return to Sign In',
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600),
+                ),
               ),
             ),
           ],
@@ -307,29 +461,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  Widget _reviewRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(children: [
-        SizedBox(
-          width: 60,
-          child: Text(label,
-              style: GoogleFonts.inter(
-                  fontSize: 11,
-                  color: AppColors.mutedText,
-                  fontWeight: FontWeight.w500)),
-        ),
-        Expanded(
-          child: Text(
-              value.isEmpty ? '—' : value,
-              style: GoogleFonts.inter(
-                  fontSize: 11,
-                  color: AppColors.darkText,
-                  fontWeight: FontWeight.w600)),
-        ),
-      ]),
-    );
-  }
+  // ══════════════════════════════════════════
+  //  BUILD
+  // ══════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -351,8 +485,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     Image.asset(
                       'assets/images/gallery/building.jpg',
                       fit: BoxFit.cover,
-                      opacity: const AlwaysStoppedAnimation(
-                          0.2),
+                      opacity:
+                          const AlwaysStoppedAnimation(0.2),
                       errorBuilder: (_, __, ___) =>
                           const SizedBox(),
                     ),
@@ -382,23 +516,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               cursor: SystemMouseCursors
                                   .click,
                               child: Row(
-                                  mainAxisSize:
-                                      MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                        Icons
-                                            .arrow_back_ios_new_rounded,
-                                        color: Colors.white38,
-                                        size: 12),
-                                    const SizedBox(
-                                        width: 6),
-                                    Text('Back',
-                                        style:
-                                            GoogleFonts.inter(
-                                                fontSize: 12,
-                                                color: Colors
-                                                    .white38)),
-                                  ]),
+                                mainAxisSize:
+                                    MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                      Icons
+                                          .arrow_back_ios_new_rounded,
+                                      color:
+                                          Colors.white38,
+                                      size: 12),
+                                  const SizedBox(
+                                      width: 6),
+                                  Text('Back',
+                                      style:
+                                          GoogleFonts.inter(
+                                              fontSize: 12,
+                                              color: Colors
+                                                  .white38)),
+                                ],
+                              ),
                             ),
                           ),
                           const Spacer(),
@@ -406,14 +542,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             Container(
                                 width: 20,
                                 height: 1,
-                                color: AppColors.brandRed),
+                                color:
+                                    AppColors.brandRed),
                             const SizedBox(width: 10),
                             Text(
                               'ST. CECILIA\'S  ·  ALUMNI',
                               style: GoogleFonts.inter(
                                   fontSize: 9,
                                   letterSpacing: 3,
-                                  color: AppColors.brandRed,
+                                  color:
+                                      AppColors.brandRed,
                                   fontWeight:
                                       FontWeight.w700),
                             ),
@@ -439,12 +577,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 color: Colors.white
                                     .withOpacity(0.4),
                                 height: 1.7,
-                                fontWeight: FontWeight.w300,
+                                fontWeight:
+                                    FontWeight.w300,
                               ),
                             ),
                           ),
                           const SizedBox(height: 32),
-                          // ─── Step indicators ───
                           ...List.generate(
                               _steps.length, (i) {
                             final done = i < _step;
@@ -459,19 +597,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       milliseconds: 300),
                                   width: 20,
                                   height: 20,
-                                  decoration: BoxDecoration(
+                                  decoration:
+                                      BoxDecoration(
                                     color: done
-                                        ? AppColors.brandRed
+                                        ? AppColors
+                                            .brandRed
                                         : active
                                             ? Colors.white
                                             : Colors.white
                                                 .withOpacity(
                                                     0.1),
-                                    shape: BoxShape.circle,
+                                    shape:
+                                        BoxShape.circle,
                                     border: Border.all(
                                       color: done ||
                                               active
-                                          ? Colors.transparent
+                                          ? Colors
+                                              .transparent
                                           : Colors.white
                                               .withOpacity(
                                                   0.2),
@@ -482,8 +624,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                         ? const Icon(
                                             Icons.check,
                                             size: 11,
-                                            color:
-                                                Colors.white)
+                                            color: Colors
+                                                .white)
                                         : Text(
                                             '${i + 1}',
                                             style: GoogleFonts.inter(
@@ -507,7 +649,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                                 : Colors
                                                     .white24,
                                         fontWeight: active
-                                            ? FontWeight.w600
+                                            ? FontWeight
+                                                .w600
                                             : FontWeight
                                                 .w300)),
                               ]),
@@ -540,27 +683,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         onTap: () =>
                             Navigator.pop(context),
                         child: Row(
-                            mainAxisSize:
-                                MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                  Icons
-                                      .arrow_back_ios_new_rounded,
-                                  size: 12,
-                                  color: AppColors.mutedText),
-                              const SizedBox(width: 6),
-                              Text('Back',
-                                  style: GoogleFonts.inter(
-                                      fontSize: 12,
-                                      color: AppColors
-                                          .mutedText)),
-                            ]),
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                                Icons
+                                    .arrow_back_ios_new_rounded,
+                                size: 12,
+                                color:
+                                    AppColors.mutedText),
+                            const SizedBox(width: 6),
+                            Text('Back',
+                                style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    color: AppColors
+                                        .mutedText)),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 24),
-                    ],
-
-                    // ─── Step progress (mobile) ───
-                    if (isMobile) ...[
                       Row(
                           children: List.generate(
                               _steps.length, (i) {
@@ -575,7 +715,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 height: 2,
                                 color: done || active
                                     ? AppColors.brandRed
-                                    : AppColors.borderSubtle,
+                                    : AppColors
+                                        .borderSubtle,
                               ),
                             ),
                             if (i < _steps.length - 1)
@@ -591,8 +732,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               color: AppColors.mutedText)),
                       const SizedBox(height: 24),
                     ],
-
-                    // ─── Step content ───
                     AnimatedSwitcher(
                       duration:
                           const Duration(milliseconds: 300),
@@ -600,10 +739,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           FadeTransition(
                               opacity: anim, child: child),
                       child: _step == 0
-                          ? _buildStep0(key: const ValueKey(0))
+                          ? _buildStep0(
+                              key: const ValueKey(0))
                           : _step == 1
-                              ? _buildStep1(key: const ValueKey(1))
-                              : _buildStep2(key: const ValueKey(2)),
+                              ? _buildStep1(
+                                  key: const ValueKey(1))
+                              : _buildStep2(
+                                  key: const ValueKey(2)),
                     ),
                   ],
                 ),
@@ -615,7 +757,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // ─── Step 0: Account ───
+  // ══════════════════════════════════════════
+  //  STEP 0 — Account
+  // ══════════════════════════════════════════
+
   Widget _buildStep0({Key? key}) {
     return Column(
       key: key,
@@ -638,14 +783,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
         Row(children: [
           Expanded(
-            child: _field(_firstNameCtrl, 'FIRST NAME',
-                'Juan'),
-          ),
+              child: _field(
+                  _firstNameCtrl, 'FIRST NAME', 'Juan')),
           const SizedBox(width: 12),
           Expanded(
-            child: _field(
-                _lastNameCtrl, 'LAST NAME', 'Dela Cruz'),
-          ),
+              child: _field(_lastNameCtrl, 'LAST NAME',
+                  'Dela Cruz')),
         ]),
         const SizedBox(height: 20),
 
@@ -659,13 +802,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
             onToggle: () =>
                 setState(() => _obscure = !_obscure)),
         const SizedBox(height: 8),
-
-        // ─── Password strength hints ───
         _passwordHints(_passwordCtrl.text),
         const SizedBox(height: 20),
 
-        _passwordField(_confirmPasswordCtrl,
-            'CONFIRM PASSWORD',
+        _passwordField(
+            _confirmPasswordCtrl, 'CONFIRM PASSWORD',
             obscure: _obscureConfirm,
             onToggle: () => setState(
                 () => _obscureConfirm = !_obscureConfirm)),
@@ -680,70 +821,37 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
         const SizedBox(height: 20),
         Center(
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('Already have an account? ',
-                style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: AppColors.mutedText)),
-            GestureDetector(
-              onTap: () =>
-                  Navigator.pushReplacementNamed(
-                      context, '/login'),
-              child: MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: Text('Sign In',
+          child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Already have an account? ',
                     style: GoogleFonts.inter(
                         fontSize: 12,
-                        color: AppColors.brandRed,
-                        fontWeight: FontWeight.w700)),
-              ),
-            ),
-          ]),
+                        color: AppColors.mutedText)),
+                GestureDetector(
+                  onTap: () =>
+                      Navigator.pushReplacementNamed(
+                          context, '/login'),
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: Text('Sign In',
+                        style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppColors.brandRed,
+                            fontWeight:
+                                FontWeight.w700)),
+                  ),
+                ),
+              ]),
         ),
       ],
     );
   }
 
-  Widget _passwordHints(String password) {
-    final checks = [
-      ['At least 8 characters', password.length >= 8],
-      [
-        'One uppercase letter',
-        RegExp(r'[A-Z]').hasMatch(password)
-      ],
-      [
-        'One number',
-        RegExp(r'[0-9]').hasMatch(password)
-      ],
-    ];
+  // ══════════════════════════════════════════
+  //  STEP 1 — Personal Info + Registry Check
+  // ══════════════════════════════════════════
 
-    return Column(
-      children: checks.map((c) {
-        final passed = c[1] as bool;
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Row(children: [
-            Icon(
-              passed
-                  ? Icons.check_circle
-                  : Icons.circle_outlined,
-              size: 12,
-              color: passed ? Colors.green : AppColors.borderSubtle,
-            ),
-            const SizedBox(width: 6),
-            Text(c[0].toString(),
-                style: GoogleFonts.inter(
-                    fontSize: 11,
-                    color: passed
-                        ? Colors.green
-                        : AppColors.mutedText)),
-          ]),
-        );
-      }).toList(),
-    );
-  }
-
-  // ─── Step 1: Personal Info ───
   Widget _buildStep1({Key? key}) {
     return Column(
       key: key,
@@ -764,7 +872,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 height: 1.5)),
         const SizedBox(height: 32),
 
-        // ─── Academic ───
         _sectionLabel('ACADEMIC DETAILS'),
         const SizedBox(height: 12),
 
@@ -772,19 +879,71 @@ class _RegisterScreenState extends State<RegisterScreen> {
           Expanded(
             child: _field(
                 _batchCtrl, 'BATCH YEAR *', 'e.g. 2015',
-                keyboardType: TextInputType.number),
+                keyboardType: TextInputType.number,
+                onChanged: (_) => setState(() {
+                      _registryChecked = false;
+                      _matchResult = null;
+                    })),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: _field(
                 _courseCtrl, 'COURSE / PROGRAM *',
-                'e.g. BS Nursing'),
+                'e.g. BS Nursing',
+                onChanged: (_) => setState(() {
+                      _registryChecked = false;
+                      _matchResult = null;
+                    })),
           ),
         ]),
 
+        const SizedBox(height: 16),
+
+        // ─── Registry check button ───
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _isCheckingRegistry
+                ? null
+                : _checkRegistry,
+            icon: _isCheckingRegistry
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.brandRed))
+                : const Icon(Icons.search,
+                    size: 16,
+                    color: AppColors.brandRed),
+            label: Text(
+              _isCheckingRegistry
+                  ? 'Checking registry...'
+                  : 'Check Alumni Registry',
+              style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: AppColors.brandRed,
+                  fontWeight: FontWeight.w600),
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.brandRed,
+              side: const BorderSide(
+                  color: AppColors.brandRed),
+              padding: const EdgeInsets.symmetric(
+                  vertical: 12),
+              shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(8)),
+            ),
+          ),
+        ),
+
+        // ─── Registry check result ───
+        if (_registryChecked && _matchResult != null)
+          _buildRegistryResult(),
+
         const SizedBox(height: 24),
 
-        // ─── Contact ───
         _sectionLabel('CONTACT & LOCATION'),
         const SizedBox(height: 12),
 
@@ -798,11 +957,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
         const SizedBox(height: 24),
 
-        // ─── Career ───
         _sectionLabel('CAREER (OPTIONAL)'),
         const SizedBox(height: 12),
 
-        _field(_occupationCtrl, 'JOB TITLE / OCCUPATION',
+        _field(_occupationCtrl,
+            'JOB TITLE / OCCUPATION',
             'e.g. Software Engineer'),
         const SizedBox(height: 16),
         _field(_companyCtrl, 'COMPANY / ORGANIZATION',
@@ -849,10 +1008,136 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // ─── Step 2: Review + Submit ───
+  Widget _buildRegistryResult() {
+    final isMatch = _matchResult!.isMatch;
+    final confidence = _matchResult!.confidence;
+    final record = _matchResult!.record;
+    final confidencePct =
+        (confidence * 100).toStringAsFixed(0);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isMatch
+            ? Colors.green.withOpacity(0.06)
+            : Colors.orange.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isMatch
+              ? Colors.green.withOpacity(0.4)
+              : Colors.orange.withOpacity(0.4),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(
+              isMatch
+                  ? Icons.verified_user
+                  : Icons.info_outline,
+              size: 16,
+              color: isMatch ? Colors.green : Colors.orange,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                isMatch
+                    ? 'Registry Match Found! ($confidencePct% confidence)'
+                    : 'No registry match found',
+                style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: isMatch
+                        ? Colors.green.shade700
+                        : Colors.orange.shade700),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 6),
+
+          if (isMatch && record != null) ...[
+            // ─── Match details ───
+            Container(
+              margin: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: Colors.green.withOpacity(0.2)),
+              ),
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  Text('Matched record:',
+                      style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.mutedText,
+                          letterSpacing: 0.5)),
+                  const SizedBox(height: 6),
+                  _matchRow(Icons.person_outline,
+                      record.fullName),
+                  if (record.batch.isNotEmpty)
+                    _matchRow(Icons.school_outlined,
+                        'Batch ${record.batch}'),
+                  if (record.course.isNotEmpty)
+                    _matchRow(Icons.book_outlined,
+                        record.course),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '✓ Your account will be automatically verified upon registration.',
+              style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: Colors.green.shade700,
+                  height: 1.4),
+            ),
+          ] else ...[
+            Text(
+              'Your application will be submitted for manual review by our committee.',
+              style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: Colors.orange.shade700,
+                  height: 1.4),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _matchRow(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(children: [
+        Icon(icon, size: 12, color: AppColors.mutedText),
+        const SizedBox(width: 6),
+        Text(text,
+            style: GoogleFonts.inter(
+                fontSize: 12,
+                color: AppColors.darkText,
+                fontWeight: FontWeight.w500)),
+      ]),
+    );
+  }
+
+  // ══════════════════════════════════════════
+  //  STEP 2 — Review + Submit
+  // ══════════════════════════════════════════
+
   Widget _buildStep2({Key? key}) {
     final fullName =
         '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
+    final isAutoVerified =
+        _matchResult?.isMatch == true &&
+            (_matchResult?.confidence ?? 0) >= 0.65;
 
     return Column(
       key: key,
@@ -873,7 +1158,65 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 height: 1.5)),
         const SizedBox(height: 28),
 
-        // ─── Review card ───
+        // ─── Registry status banner ───
+        Container(
+          padding: const EdgeInsets.all(12),
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: isAutoVerified
+                ? Colors.green.withOpacity(0.07)
+                : Colors.orange.withOpacity(0.07),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isAutoVerified
+                  ? Colors.green.withOpacity(0.3)
+                  : Colors.orange.withOpacity(0.3),
+            ),
+          ),
+          child: Row(children: [
+            Icon(
+              isAutoVerified
+                  ? Icons.verified_user
+                  : Icons.pending_outlined,
+              size: 18,
+              color: isAutoVerified
+                  ? Colors.green
+                  : Colors.orange,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isAutoVerified
+                        ? 'Auto-Verification Ready'
+                        : 'Manual Review Required',
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: isAutoVerified
+                            ? Colors.green.shade700
+                            : Colors.orange.shade700),
+                  ),
+                  Text(
+                    isAutoVerified
+                        ? 'Your identity matched our alumni registry. You\'ll be verified instantly.'
+                        : 'No registry match found. Your application will be reviewed by our committee.',
+                    style: GoogleFonts.inter(
+                        fontSize: 11,
+                        color: isAutoVerified
+                            ? Colors.green.shade600
+                            : Colors.orange.shade600,
+                        height: 1.4),
+                  ),
+                ],
+              ),
+            ),
+          ]),
+        ),
+
         _reviewSection('ACCOUNT', [
           ['Full Name', fullName],
           ['Email', _emailCtrl.text.trim()],
@@ -882,6 +1225,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _reviewSection('ACADEMIC', [
           ['Batch Year', _batchCtrl.text.trim()],
           ['Course', _courseCtrl.text.trim()],
+          [
+            'Registry',
+            isAutoVerified
+                ? '✓ Matched'
+                : 'Not matched'
+          ],
         ]),
         if (_phoneCtrl.text.trim().isNotEmpty ||
             _locationCtrl.text.trim().isNotEmpty) ...[
@@ -912,8 +1261,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
           decoration: BoxDecoration(
             color: AppColors.softWhite,
             borderRadius: BorderRadius.circular(10),
-            border:
-                Border.all(color: AppColors.borderSubtle),
+            border: Border.all(
+                color: AppColors.borderSubtle),
           ),
           child: Row(
             crossAxisAlignment:
@@ -988,10 +1337,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
           Expanded(
             flex: 2,
             child: ElevatedButton(
-              onPressed:
-                  _isLoading ? null : _register,
+              onPressed: _isLoading ? null : _register,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.brandRed,
+                backgroundColor: isAutoVerified
+                    ? Colors.green
+                    : AppColors.brandRed,
                 foregroundColor: Colors.white,
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(
@@ -1009,7 +1359,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       child: CircularProgressIndicator(
                           color: Colors.white,
                           strokeWidth: 2))
-                  : Text('SUBMIT APPLICATION',
+                  : Text(
+                      isAutoVerified
+                          ? 'SUBMIT & GET VERIFIED'
+                          : 'SUBMIT APPLICATION',
                       style: GoogleFonts.inter(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -1018,6 +1371,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
         ]),
       ],
+    );
+  }
+
+  // ══════════════════════════════════════════
+  //  SHARED WIDGETS
+  // ══════════════════════════════════════════
+
+  Widget _reviewRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(children: [
+        SizedBox(
+          width: 60,
+          child: Text(label,
+              style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: AppColors.mutedText,
+                  fontWeight: FontWeight.w500)),
+        ),
+        Expanded(
+          child: Text(value.isEmpty ? '—' : value,
+              style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: AppColors.darkText,
+                  fontWeight: FontWeight.w600)),
+        ),
+      ]),
     );
   }
 
@@ -1041,8 +1421,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           ...rows.map((row) => Padding(
-                padding:
-                    const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.only(bottom: 6),
                 child: Row(children: [
                   SizedBox(
                     width: 72,
@@ -1056,9 +1435,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         row[1].isEmpty ? '—' : row[1],
                         style: GoogleFonts.inter(
                             fontSize: 11,
-                            color: AppColors.darkText,
-                            fontWeight:
-                                FontWeight.w600)),
+                            color: row[1].startsWith('✓')
+                                ? Colors.green.shade700
+                                : AppColors.darkText,
+                            fontWeight: FontWeight.w600)),
                   ),
                 ]),
               )),
@@ -1067,8 +1447,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  Widget _stepButton(
-      String label, VoidCallback onTap) {
+  Widget _stepButton(String label, VoidCallback onTap) {
     return SizedBox(
       width: double.infinity,
       height: 50,
@@ -1093,9 +1472,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget _sectionLabel(String label) {
     return Row(children: [
       Container(
-          width: 16,
-          height: 1,
-          color: AppColors.brandRed),
+          width: 16, height: 1, color: AppColors.brandRed),
       const SizedBox(width: 8),
       Text(label,
           style: GoogleFonts.inter(
@@ -1106,6 +1483,43 @@ class _RegisterScreenState extends State<RegisterScreen> {
     ]);
   }
 
+  Widget _passwordHints(String password) {
+    final checks = [
+      ['At least 8 characters', password.length >= 8],
+      [
+        'One uppercase letter',
+        RegExp(r'[A-Z]').hasMatch(password)
+      ],
+      ['One number', RegExp(r'[0-9]').hasMatch(password)],
+    ];
+    return Column(
+      children: checks.map((c) {
+        final passed = c[1] as bool;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Row(children: [
+            Icon(
+              passed
+                  ? Icons.check_circle
+                  : Icons.circle_outlined,
+              size: 12,
+              color: passed
+                  ? Colors.green
+                  : AppColors.borderSubtle,
+            ),
+            const SizedBox(width: 6),
+            Text(c[0].toString(),
+                style: GoogleFonts.inter(
+                    fontSize: 11,
+                    color: passed
+                        ? Colors.green
+                        : AppColors.mutedText)),
+          ]),
+        );
+      }).toList(),
+    );
+  }
+
   Widget _field(
     TextEditingController ctrl,
     String label,
@@ -1113,6 +1527,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     int maxLines = 1,
     TextInputType? keyboardType,
     IconData? prefixIcon,
+    ValueChanged<String>? onChanged,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1130,7 +1545,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
           keyboardType: keyboardType,
           style: GoogleFonts.inter(
               fontSize: 13, color: AppColors.darkText),
-          onChanged: (_) => setState(() {}),
+          onChanged: onChanged ??
+              (_) => setState(() {}),
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: GoogleFonts.inter(
