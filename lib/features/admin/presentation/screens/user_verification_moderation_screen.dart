@@ -20,13 +20,11 @@ class UserVerificationScreen extends StatefulWidget {
 
 class _UserVerificationScreenState
     extends State<UserVerificationScreen> {
-  // ─── Tab state ───
-  // 0=All, 1=Pending, 2=Recent, 3=Queue, 4=Registry
+  // 0=All, 1=Rejected, 2=Recent, 3=Queue, 4=Registry
   int _currentTab = 3;
 
-  // ─── User lists ───
   List<Map<String, dynamic>> allUsers = [];
-  List<Map<String, dynamic>> pendingUsers = [];
+  List<Map<String, dynamic>> rejectedUsers = [];
   List<Map<String, dynamic>> recentLogins = [];
   List<Map<String, dynamic>> verificationQueue = [];
 
@@ -38,16 +36,13 @@ class _UserVerificationScreenState
   final _searchController = TextEditingController();
   String _searchText = '';
 
-  // ─── Registry state ───
   final _registryService = RegistryService();
   bool _isUploading = false;
   String _registrySearch = '';
-  int _registryTab = 0; // 0=uploads, 1=all records
+  int _registryTab = 0;
   String? _selectedUploadId;
   final _registrySearchCtrl = TextEditingController();
 
-  // ─── Match view state ───
-  // Cache: userId -> matched AlumniRecord
   final Map<String, AlumniRecord?> _matchCache = {};
   bool _loadingMatches = false;
 
@@ -113,14 +108,17 @@ class _UserVerificationScreenState
         final d = doc.data();
         return {
           'id': doc.id,
-          'name': (d['name'] ?? d['fullName'] ?? 'Unknown')
-              .toString()
-              .trim(),
+          'name':
+              (d['name'] ?? d['fullName'] ?? 'Unknown')
+                  .toString()
+                  .trim(),
           'email': d['email']?.toString() ?? '—',
           'role': d['role']?.toString() ?? 'alumni',
-          'status': d['status']?.toString() ?? 'active',
+          'status':
+              d['status']?.toString() ?? 'active',
           'verificationStatus':
-              d['verificationStatus']?.toString() ?? 'none',
+              d['verificationStatus']?.toString() ??
+                  'none',
           'batch': d['batchYear']?.toString() ??
               d['batch']?.toString() ??
               '—',
@@ -135,7 +133,8 @@ class _UserVerificationScreenState
               (d['createdAt'] as Timestamp?)?.toDate(),
           'lastLogin':
               (d['lastLogin'] as Timestamp?)?.toDate() ??
-                  (d['lastActive'] as Timestamp?)?.toDate(),
+                  (d['lastActive'] as Timestamp?)
+                      ?.toDate(),
           'verifiedAt':
               (d['verifiedAt'] as Timestamp?)?.toDate(),
           'rejectedAt':
@@ -148,21 +147,31 @@ class _UserVerificationScreenState
               d['connectionsCount']?.toString() ?? '0',
           'followersCount':
               d['followersCount']?.toString() ?? '0',
-          // ─── Registry match fields ───
           'registryMatchId':
               d['registryMatchId']?.toString() ?? '',
           'matchConfidence':
-              (d['matchConfidence'] as num?)?.toDouble() ?? 0.0,
-          'verifiedBy': d['verifiedBy']?.toString() ?? '',
+              (d['matchConfidence'] as num?)
+                      ?.toDouble() ??
+                  0.0,
+          'verifiedBy':
+              d['verifiedBy']?.toString() ?? '',
         };
       }).toList();
 
       if (!mounted) return;
       setState(() {
         allUsers = list;
-        pendingUsers = list
-            .where((u) => u['status'] == 'pending')
-            .toList();
+
+        // ─── Tab 1: Rejected accounts ───
+        rejectedUsers = list.where((u) {
+          final status = u['status'].toString();
+          final ver =
+              u['verificationStatus'].toString();
+          return status == 'denied' ||
+              status == 'rejected' ||
+              ver == 'rejected';
+        }).toList();
+
         recentLogins = List.from(list)
           ..sort((a, b) {
             final aT = a['lastLogin'] as DateTime?;
@@ -170,14 +179,23 @@ class _UserVerificationScreenState
             return (bT ?? DateTime(2000))
                 .compareTo(aT ?? DateTime(2000));
           });
+
+        // ─── Queue: only truly pending, exclude rejected ───
         verificationQueue = list.where((u) {
-          return u['status'] == 'pending' ||
-              u['verificationStatus'] == 'pending';
+          final status = u['status'].toString();
+          final ver =
+              u['verificationStatus'].toString();
+          final isRejected = status == 'denied' ||
+              status == 'rejected' ||
+              ver == 'rejected';
+          final isPending = status == 'pending' ||
+              ver == 'pending';
+          return isPending && !isRejected;
         }).toList();
+
         isLoading = false;
       });
 
-      // ─── Load registry matches for queue ───
       await _loadMatchesForQueue();
     } catch (e) {
       if (!mounted) return;
@@ -188,8 +206,6 @@ class _UserVerificationScreenState
     }
   }
 
-  /// Fetches the matched AlumniRecord for each user
-  /// in the verification queue that has a registryMatchId.
   Future<void> _loadMatchesForQueue() async {
     if (!mounted) return;
     setState(() => _loadingMatches = true);
@@ -199,7 +215,8 @@ class _UserVerificationScreenState
 
     for (final user in queue) {
       final uid = user['id'].toString();
-      final matchId = user['registryMatchId'].toString();
+      final matchId =
+          user['registryMatchId'].toString();
 
       if (matchId.isNotEmpty) {
         try {
@@ -208,8 +225,8 @@ class _UserVerificationScreenState
               .doc(matchId)
               .get();
           if (doc.exists) {
-            newCache[uid] =
-                AlumniRecord.fromMap(doc.id, doc.data()!);
+            newCache[uid] = AlumniRecord.fromMap(
+                doc.id, doc.data()!);
           } else {
             newCache[uid] = null;
           }
@@ -217,9 +234,9 @@ class _UserVerificationScreenState
           newCache[uid] = null;
         }
       } else {
-        // ─── Try live lookup by name+batch ───
         try {
-          final result = await _registryService.checkUser(
+          final result =
+              await _registryService.checkUser(
             fullName: user['name'].toString(),
             batch: user['batch'].toString(),
             course: user['course'].toString(),
@@ -265,15 +282,17 @@ class _UserVerificationScreenState
 
     try {
       List<AlumniRecord> records = [];
-      final ext = (file.extension ?? '').toLowerCase();
+      final ext =
+          (file.extension ?? '').toLowerCase();
       const tempBatchId = 'temp';
 
       if (ext == 'csv') {
         final content = String.fromCharCodes(bytes);
-        records = CsvParser.parse(content, tempBatchId);
-      } else if (ext == 'xlsx' || ext == 'xls') {
         records =
-            ExcelParser.parse(bytes.toList(), tempBatchId);
+            CsvParser.parse(content, tempBatchId);
+      } else if (ext == 'xlsx' || ext == 'xls') {
+        records = ExcelParser.parse(
+            bytes.toList(), tempBatchId);
       } else {
         _showSnackBar('Unsupported file type.',
             isError: true);
@@ -289,14 +308,15 @@ class _UserVerificationScreenState
         return;
       }
 
-      final confirmed =
-          await _showUploadPreviewDialog(records, file.name);
+      final confirmed = await _showUploadPreviewDialog(
+          records, file.name);
       if (confirmed != true) {
         setState(() => _isUploading = false);
         return;
       }
 
-      final upload = await _registryService.uploadRecords(
+      final upload =
+          await _registryService.uploadRecords(
         records: records,
         fileName: file.name,
         uploadedByName: _adminName,
@@ -311,13 +331,15 @@ class _UserVerificationScreenState
           _registryTab = 0;
           _selectedUploadId = null;
         });
-        // ─── Reload to reflect new matches ───
         await _loadUsers();
       }
     } catch (e) {
-      _showSnackBar('Upload failed: $e', isError: true);
+      _showSnackBar('Upload failed: $e',
+          isError: true);
     } finally {
-      if (mounted) setState(() => _isUploading = false);
+      if (mounted) {
+        setState(() => _isUploading = false);
+      }
     }
   }
 
@@ -343,11 +365,12 @@ class _UserVerificationScreenState
           width: 500,
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
             children: [
               _previewInfoRow('File', fileName),
-              _previewInfoRow(
-                  'Records found', '${records.length}'),
+              _previewInfoRow('Records found',
+                  '${records.length}'),
               const SizedBox(height: 12),
               Text('Preview (first 5 rows):',
                   style: GoogleFonts.inter(
@@ -359,7 +382,8 @@ class _UserVerificationScreenState
                 decoration: BoxDecoration(
                   border: Border.all(
                       color: AppColors.borderSubtle),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius:
+                      BorderRadius.circular(8),
                 ),
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -376,21 +400,27 @@ class _UserVerificationScreenState
                         fontSize: 11,
                         color: AppColors.darkText),
                     columns: const [
-                      DataColumn(label: Text('FULL NAME')),
-                      DataColumn(label: Text('BATCH')),
-                      DataColumn(label: Text('COURSE')),
-                      DataColumn(label: Text('EMAIL')),
+                      DataColumn(
+                          label: Text('FULL NAME')),
+                      DataColumn(
+                          label: Text('BATCH')),
+                      DataColumn(
+                          label: Text('COURSE')),
+                      DataColumn(
+                          label: Text('EMAIL')),
                     ],
                     rows: records.take(5).map((r) {
                       return DataRow(cells: [
                         DataCell(Text(r.fullName)),
-                        DataCell(Text(
-                            r.batch.isEmpty ? '—' : r.batch)),
+                        DataCell(Text(r.batch.isEmpty
+                            ? '—'
+                            : r.batch)),
                         DataCell(Text(r.course.isEmpty
                             ? '—'
                             : r.course)),
-                        DataCell(Text(
-                            r.email.isEmpty ? '—' : r.email)),
+                        DataCell(Text(r.email.isEmpty
+                            ? '—'
+                            : r.email)),
                       ]);
                     }).toList(),
                   ),
@@ -398,7 +428,8 @@ class _UserVerificationScreenState
               ),
               if (records.length > 5)
                 Padding(
-                  padding: const EdgeInsets.only(top: 6),
+                  padding:
+                      const EdgeInsets.only(top: 6),
                   child: Text(
                       '...and ${records.length - 5} more records',
                       style: GoogleFonts.inter(
@@ -423,7 +454,8 @@ class _UserVerificationScreenState
               backgroundColor: AppColors.brandRed,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
+                  borderRadius:
+                      BorderRadius.circular(8)),
             ),
             child: Text(
                 'Upload ${records.length} Records',
@@ -446,7 +478,8 @@ class _UserVerificationScreenState
                 color: AppColors.mutedText)),
         Text(value,
             style: GoogleFonts.inter(
-                fontSize: 12, color: AppColors.darkText)),
+                fontSize: 12,
+                color: AppColors.darkText)),
       ]),
     );
   }
@@ -467,7 +500,8 @@ class _UserVerificationScreenState
           isError: false);
       setState(() => _selectedUploadId = null);
     } catch (e) {
-      _showSnackBar('Delete failed: $e', isError: true);
+      _showSnackBar('Delete failed: $e',
+          isError: true);
     }
   }
 
@@ -478,18 +512,23 @@ class _UserVerificationScreenState
   List<Map<String, dynamic>> get _filtered {
     final list = switch (_currentTab) {
       0 => allUsers,
-      1 => pendingUsers,
+      1 => rejectedUsers,
       2 => recentLogins,
       3 => verificationQueue,
       _ => <Map<String, dynamic>>[],
     };
     if (_searchText.isEmpty) return list;
     return list.where((u) {
-      final name = u['name'].toString().toLowerCase();
-      final email = u['email'].toString().toLowerCase();
-      final role = u['role'].toString().toLowerCase();
-      final batch = u['batch'].toString().toLowerCase();
-      final status = u['status'].toString().toLowerCase();
+      final name =
+          u['name'].toString().toLowerCase();
+      final email =
+          u['email'].toString().toLowerCase();
+      final role =
+          u['role'].toString().toLowerCase();
+      final batch =
+          u['batch'].toString().toLowerCase();
+      final status =
+          u['status'].toString().toLowerCase();
       final ver =
           u['verificationStatus'].toString().toLowerCase();
       return name.contains(_searchText) ||
@@ -506,7 +545,8 @@ class _UserVerificationScreenState
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(msg, style: GoogleFonts.inter()),
+        content:
+            Text(msg, style: GoogleFonts.inter()),
         backgroundColor:
             isError ? Colors.red : Colors.green,
         behavior: SnackBarBehavior.floating,
@@ -541,7 +581,6 @@ class _UserVerificationScreenState
             FirebaseAuth.instance.currentUser?.uid,
       });
 
-      // ─── If there's a cached match, mark registry record ───
       final match = _matchCache[uid];
       if (match != null) {
         await FirebaseFirestore.instance
@@ -580,7 +619,8 @@ class _UserVerificationScreenState
                 color: AppColors.brandRed)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
           children: [
             Text('Reject verification for $name?',
                 style: GoogleFonts.inter()),
@@ -642,6 +682,7 @@ class _UserVerificationScreenState
     try {
       final update = <String, dynamic>{
         'verificationStatus': 'rejected',
+        'status': 'rejected',
         'rejectedAt': FieldValue.serverTimestamp(),
         'rejectedBy':
             FirebaseAuth.instance.currentUser?.uid,
@@ -653,6 +694,16 @@ class _UserVerificationScreenState
           .collection('users')
           .doc(uid)
           .update(update);
+
+      // ─── Remove from local queue immediately ───
+      if (mounted) {
+        setState(() {
+          verificationQueue.removeWhere(
+              (u) => u['id'].toString() == uid);
+          _matchCache.remove(uid);
+        });
+      }
+
       _showSnackBar('Verification rejected for $name',
           isError: false);
       await _loadUsers();
@@ -677,7 +728,7 @@ class _UserVerificationScreenState
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Select a new role for this user:',
+              Text('Select a new role:',
                   style: GoogleFonts.inter()),
               const SizedBox(height: 16),
               ...[
@@ -694,7 +745,8 @@ class _UserVerificationScreenState
                   title: Text(role.toUpperCase(),
                       style: GoogleFonts.inter(
                           fontSize: 13,
-                          fontWeight: FontWeight.w500)),
+                          fontWeight:
+                              FontWeight.w500)),
                   onChanged: (v) =>
                       setSt(() => selected = v!),
                 ),
@@ -737,8 +789,10 @@ class _UserVerificationScreenState
 
   Future<void> _toggleSuspend(
       String uid, String currentStatus) async {
-    final isSuspended = currentStatus == 'suspended';
-    final action = isSuspended ? 'Unsuspend' : 'Suspend';
+    final isSuspended =
+        currentStatus == 'suspended';
+    final action =
+        isSuspended ? 'Unsuspend' : 'Suspend';
     final confirm = await _confirmDialog(
       title: '$action User',
       message: isSuspended
@@ -754,11 +808,14 @@ class _UserVerificationScreenState
           .collection('users')
           .doc(uid)
           .update({
-        'status': isSuspended ? 'active' : 'suspended',
+        'status':
+            isSuspended ? 'active' : 'suspended',
         'updatedAt': FieldValue.serverTimestamp(),
       });
       _showSnackBar(
-          isSuspended ? 'User unsuspended' : 'User suspended',
+          isSuspended
+              ? 'User unsuspended'
+              : 'User suspended',
           isError: false);
       await _loadUsers();
     } catch (e) {
@@ -826,11 +883,9 @@ class _UserVerificationScreenState
   }
 
   // ══════════════════════════════════════════
-  //  VERIFICATION QUEUE — MATCH VIEW
+  //  VERIFICATION QUEUE VIEW
   // ══════════════════════════════════════════
 
-  /// The main queue view: each row shows the registered
-  /// user alongside their matched registry record.
   Widget _buildVerificationQueueView() {
     final data = _filtered;
 
@@ -840,7 +895,8 @@ class _UserVerificationScreenState
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Icon(Icons.how_to_reg_outlined,
-                size: 72, color: AppColors.borderSubtle),
+                size: 72,
+                color: AppColors.borderSubtle),
             const SizedBox(height: 16),
             Text('No pending verification requests',
                 style: GoogleFonts.cormorantGaramond(
@@ -859,7 +915,6 @@ class _UserVerificationScreenState
 
     return Column(
       children: [
-        // ─── Header bar ───
         Container(
           color: AppColors.softWhite,
           padding: const EdgeInsets.symmetric(
@@ -888,7 +943,6 @@ class _UserVerificationScreenState
                         color: AppColors.mutedText)),
               ]),
             const SizedBox(width: 12),
-            // ─── Legend ───
             _legendChip(Colors.green, 'Registry Match'),
             const SizedBox(width: 8),
             _legendChip(Colors.orange, 'No Match'),
@@ -896,8 +950,6 @@ class _UserVerificationScreenState
             _legendChip(Colors.blue, 'Auto-Verified'),
           ]),
         ),
-
-        // ─── Column headers ───
         Container(
           color: AppColors.softWhite,
           padding: const EdgeInsets.symmetric(
@@ -934,8 +986,6 @@ class _UserVerificationScreenState
             const SizedBox(width: 160),
           ]),
         ),
-
-        // ─── Cards ───
         Expanded(
           child: ListView.separated(
             padding: const EdgeInsets.all(16),
@@ -963,7 +1013,6 @@ class _UserVerificationScreenState
         user['verifiedBy'].toString() == 'system_auto';
     final created = user['createdAt'] as DateTime?;
 
-    // ─── Determine border accent color ───
     Color accentColor;
     if (isAutoVerified) {
       accentColor = Colors.blue;
@@ -990,7 +1039,6 @@ class _UserVerificationScreenState
       ),
       child: Column(
         children: [
-          // ─── Top strip ───
           Container(
             padding: const EdgeInsets.symmetric(
                 horizontal: 16, vertical: 8),
@@ -1010,18 +1058,19 @@ class _UserVerificationScreenState
                 color: accentColor,
               ),
               const SizedBox(width: 6),
-              Text(
-                isAutoVerified
-                    ? 'Auto-verified via registry match'
-                    : hasMatch
-                        ? 'Registry match found (${(confidence * 100).toStringAsFixed(0)}% confidence)'
-                        : 'No registry match found — manual review required',
-                style: GoogleFonts.inter(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: accentColor),
+              Expanded(
+                child: Text(
+                  isAutoVerified
+                      ? 'Auto-verified via registry match'
+                      : hasMatch
+                          ? 'Registry match found (${(confidence * 100).toStringAsFixed(0)}% confidence)'
+                          : 'No registry match found — manual review required',
+                  style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: accentColor),
+                ),
               ),
-              const Spacer(),
               if (created != null)
                 Text(
                     'Applied ${DateFormat('MMM dd, yyyy').format(created)}',
@@ -1030,59 +1079,58 @@ class _UserVerificationScreenState
                         color: AppColors.mutedText)),
             ]),
           ),
-
-          // ─── Two-column body ───
           IntrinsicHeight(
             child: Row(
               crossAxisAlignment:
                   CrossAxisAlignment.stretch,
               children: [
-                // ─── Left: Registered user ───
                 Expanded(
                   flex: 5,
                   child: Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding:
+                        const EdgeInsets.all(16),
                     child: _buildUserPanel(user),
                   ),
                 ),
-
-                // ─── Divider ───
                 Container(
                   width: 1,
-                  color: accentColor.withOpacity(0.15),
+                  color:
+                      accentColor.withOpacity(0.15),
                   margin: const EdgeInsets.symmetric(
                       vertical: 12),
                 ),
-
-                // ─── Right: Registry record ───
                 Expanded(
                   flex: 5,
                   child: Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding:
+                        const EdgeInsets.all(16),
                     child: hasMatch
                         ? _buildRegistryPanel(
                             match, confidence)
                         : _buildNoMatchPanel(),
                   ),
                 ),
-
-                // ─── Action buttons ───
                 Container(
                   width: 160,
-                  padding: const EdgeInsets.all(16),
+                  padding:
+                      const EdgeInsets.all(16),
                   child: Column(
                     mainAxisAlignment:
                         MainAxisAlignment.center,
                     children: [
                       _matchField(
-                          'Status', _statusBadgeRow(status, verStatus)),
+                          'Status',
+                          _statusBadgeRow(
+                              status, verStatus)),
                       const SizedBox(height: 12),
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton.icon(
-                          onPressed: () => _approve(uid),
+                          onPressed: () =>
+                              _approve(uid),
                           icon: const Icon(
-                              Icons.check_circle_outline,
+                              Icons
+                                  .check_circle_outline,
                               size: 14),
                           label: Text('Approve',
                               style: GoogleFonts.inter(
@@ -1093,16 +1141,18 @@ class _UserVerificationScreenState
                               ElevatedButton.styleFrom(
                             backgroundColor:
                                 Colors.green,
-                            foregroundColor: Colors.white,
+                            foregroundColor:
+                                Colors.white,
                             elevation: 0,
-                            padding:
-                                const EdgeInsets.symmetric(
-                                    vertical: 10),
+                            padding: const EdgeInsets
+                                .symmetric(
+                                vertical: 10),
                             shape:
                                 RoundedRectangleBorder(
                                     borderRadius:
                                         BorderRadius
-                                            .circular(8)),
+                                            .circular(
+                                                8)),
                           ),
                         ),
                       ),
@@ -1110,7 +1160,8 @@ class _UserVerificationScreenState
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
-                          onPressed: () => _reject(uid),
+                          onPressed: () =>
+                              _reject(uid),
                           icon: const Icon(
                               Icons.cancel_outlined,
                               size: 14),
@@ -1124,15 +1175,17 @@ class _UserVerificationScreenState
                             foregroundColor:
                                 AppColors.brandRed,
                             side: const BorderSide(
-                                color: AppColors.brandRed),
-                            padding:
-                                const EdgeInsets.symmetric(
-                                    vertical: 10),
+                                color:
+                                    AppColors.brandRed),
+                            padding: const EdgeInsets
+                                .symmetric(
+                                vertical: 10),
                             shape:
                                 RoundedRectangleBorder(
                                     borderRadius:
                                         BorderRadius
-                                            .circular(8)),
+                                            .circular(
+                                                8)),
                           ),
                         ),
                       ),
@@ -1145,9 +1198,9 @@ class _UserVerificationScreenState
                           style: TextButton.styleFrom(
                             foregroundColor:
                                 AppColors.mutedText,
-                            padding:
-                                const EdgeInsets.symmetric(
-                                    vertical: 8),
+                            padding: const EdgeInsets
+                                .symmetric(
+                                vertical: 8),
                           ),
                           child: Text('View Profile',
                               style: GoogleFonts.inter(
@@ -1167,7 +1220,6 @@ class _UserVerificationScreenState
     );
   }
 
-  /// Left panel: the user who registered
   Widget _buildUserPanel(Map<String, dynamic> user) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1229,10 +1281,10 @@ class _UserVerificationScreenState
     );
   }
 
-  /// Right panel: the matched alumni registry record
   Widget _buildRegistryPanel(
       AlumniRecord record, double confidence) {
-    final pct = (confidence * 100).toStringAsFixed(0);
+    final pct =
+        (confidence * 100).toStringAsFixed(0);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1264,8 +1316,10 @@ class _UserVerificationScreenState
                   Text('$pct% match',
                       style: GoogleFonts.inter(
                           fontSize: 10,
-                          color: Colors.green.shade700,
-                          fontWeight: FontWeight.w600)),
+                          color:
+                              Colors.green.shade700,
+                          fontWeight:
+                              FontWeight.w600)),
                 ]),
               ],
             ),
@@ -1273,8 +1327,16 @@ class _UserVerificationScreenState
         ]),
         const SizedBox(height: 12),
         _infoGrid([
-          ['Batch', record.batch.isEmpty ? '—' : record.batch],
-          ['Course', record.course.isEmpty ? '—' : record.course],
+          [
+            'Batch',
+            record.batch.isEmpty ? '—' : record.batch
+          ],
+          [
+            'Course',
+            record.course.isEmpty
+                ? '—'
+                : record.course
+          ],
           [
             'Email',
             record.email.isEmpty ? '—' : record.email
@@ -1290,7 +1352,6 @@ class _UserVerificationScreenState
     );
   }
 
-  /// Right panel when no registry match found
   Widget _buildNoMatchPanel() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -1328,7 +1389,8 @@ class _UserVerificationScreenState
             color: Colors.orange.withOpacity(0.08),
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
-                color: Colors.orange.withOpacity(0.3)),
+                color:
+                    Colors.orange.withOpacity(0.3)),
           ),
           child: Text(
               'Requires manual identity verification',
@@ -1390,8 +1452,10 @@ class _UserVerificationScreenState
   Widget _statusBadgeRow(
       String status, String verStatus) {
     return Wrap(spacing: 4, runSpacing: 4, children: [
-      _badge(status.toUpperCase(), _statusColor(status)),
-      _badge(verStatus.toUpperCase(), _verColor(verStatus)),
+      _badge(status.toUpperCase(),
+          _statusColor(status)),
+      _badge(verStatus.toUpperCase(),
+          _verColor(verStatus)),
     ]);
   }
 
@@ -1402,10 +1466,16 @@ class _UserVerificationScreenState
       child: ClipRRect(
         borderRadius: BorderRadius.circular(2),
         child: LinearProgressIndicator(
-          value: confidence,
-          backgroundColor: Colors.green.withOpacity(0.15),
-          valueColor:
-              const AlwaysStoppedAnimation(Colors.green),
+          value: confidence.clamp(0.0, 1.0),
+          backgroundColor:
+              Colors.green.withOpacity(0.15),
+          valueColor: AlwaysStoppedAnimation(
+            confidence >= 0.80
+                ? Colors.green
+                : confidence >= 0.65
+                    ? Colors.lightGreen
+                    : Colors.orange,
+          ),
         ),
       ),
     );
@@ -1421,7 +1491,8 @@ class _UserVerificationScreenState
       const SizedBox(width: 4),
       Text(label,
           style: GoogleFonts.inter(
-              fontSize: 10, color: AppColors.mutedText)),
+              fontSize: 10,
+              color: AppColors.mutedText)),
     ]);
   }
 
@@ -1430,10 +1501,14 @@ class _UserVerificationScreenState
   // ══════════════════════════════════════════
 
   void _showUserDetails(Map<String, dynamic> user) {
-    final created = user['createdAt'] as DateTime?;
-    final lastLogin = user['lastLogin'] as DateTime?;
-    final verifiedAt = user['verifiedAt'] as DateTime?;
-    final rejectedAt = user['rejectedAt'] as DateTime?;
+    final created =
+        user['createdAt'] as DateTime?;
+    final lastLogin =
+        user['lastLogin'] as DateTime?;
+    final verifiedAt =
+        user['verifiedAt'] as DateTime?;
+    final rejectedAt =
+        user['rejectedAt'] as DateTime?;
     final status = user['status'].toString();
     final verStatus =
         user['verificationStatus'].toString();
@@ -1464,7 +1539,8 @@ class _UserVerificationScreenState
                 height: 4,
                 decoration: BoxDecoration(
                   color: AppColors.borderSubtle,
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius:
+                      BorderRadius.circular(2),
                 ),
               ),
               Padding(
@@ -1478,7 +1554,8 @@ class _UserVerificationScreenState
                                 fontSize: 24,
                                 fontWeight:
                                     FontWeight.w600,
-                                color: AppColors.darkText)),
+                                color:
+                                    AppColors.darkText)),
                     const Spacer(),
                     IconButton(
                       icon: const Icon(Icons.close,
@@ -1510,26 +1587,26 @@ class _UserVerificationScreenState
                                     user['profilePictureUrl']
                                         .toString())
                                 : null,
-                        child:
-                            user['profilePictureUrl'] ==
-                                    null
-                                ? Text(
-                                    user['name']
-                                            .toString()
-                                            .isNotEmpty
-                                        ? user['name']
-                                            .toString()[0]
-                                            .toUpperCase()
-                                        : '?',
-                                    style: GoogleFonts
-                                        .cormorantGaramond(
-                                            fontSize: 28,
-                                            color: AppColors
-                                                .brandRed,
-                                            fontWeight:
-                                                FontWeight
-                                                    .w600))
-                                : null,
+                        child: user[
+                                    'profilePictureUrl'] ==
+                                null
+                            ? Text(
+                                user['name']
+                                        .toString()
+                                        .isNotEmpty
+                                    ? user['name']
+                                        .toString()[0]
+                                        .toUpperCase()
+                                    : '?',
+                                style: GoogleFonts
+                                    .cormorantGaramond(
+                                        fontSize: 28,
+                                        color: AppColors
+                                            .brandRed,
+                                        fontWeight:
+                                            FontWeight
+                                                .w600))
+                            : null,
                       ),
                       const SizedBox(width: 20),
                       Expanded(
@@ -1571,11 +1648,13 @@ class _UserVerificationScreenState
                                       AppColors.brandRed),
                                   _badge(
                                       status.toUpperCase(),
-                                      _statusColor(status)),
+                                      _statusColor(
+                                          status)),
                                   _badge(
                                       verStatus
                                           .toUpperCase(),
-                                      _verColor(verStatus)),
+                                      _verColor(
+                                          verStatus)),
                                 ]),
                           ],
                         ),
@@ -1593,13 +1672,13 @@ class _UserVerificationScreenState
                           user['followersCount']
                               .toString()),
                       const SizedBox(width: 12),
-                      _statMini(
-                          'Batch',
+                      _statMini('Batch',
                           user['batch'].toString()),
                     ]),
                     const SizedBox(height: 20),
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding:
+                          const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: AppColors.softWhite,
                         borderRadius:
@@ -1627,7 +1706,8 @@ class _UserVerificationScreenState
                             user['phone'].toString()),
                         _divider(),
                         _infoRow(
-                            Icons.calendar_today_outlined,
+                            Icons
+                                .calendar_today_outlined,
                             'Joined',
                             created != null
                                 ? DateFormat(
@@ -1646,7 +1726,8 @@ class _UserVerificationScreenState
                         if (verifiedAt != null) ...[
                           _divider(),
                           _infoRow(
-                              Icons.verified_user_outlined,
+                              Icons
+                                  .verified_user_outlined,
                               'Verified On',
                               DateFormat(
                                       'MMM dd, yyyy • HH:mm')
@@ -1666,7 +1747,7 @@ class _UserVerificationScreenState
                             _divider(),
                             _infoRow(
                                 Icons.info_outline,
-                                'Rejection Reason',
+                                'Reason',
                                 user['rejectionReason']
                                     .toString()),
                           ],
@@ -1674,15 +1755,15 @@ class _UserVerificationScreenState
                       ]),
                     ),
 
-                    // ─── Show matched record in detail ───
+                    // ─── Matched registry record ───
                     if (_matchCache[uid] != null) ...[
                       const SizedBox(height: 16),
                       Container(
                         padding:
                             const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color:
-                              Colors.green.withOpacity(0.05),
+                          color: Colors.green
+                              .withOpacity(0.05),
                           borderRadius:
                               BorderRadius.circular(12),
                           border: Border.all(
@@ -1707,20 +1788,22 @@ class _UserVerificationScreenState
                                           FontWeight.w700,
                                       color: Colors
                                           .green.shade700,
-                                      letterSpacing: 0.4)),
+                                      letterSpacing:
+                                          0.4)),
                             ]),
                             const SizedBox(height: 12),
                             _infoRow(
                                 Icons.person_outline,
                                 'Full Name',
-                                _matchCache[uid]!.fullName),
+                                _matchCache[uid]!
+                                    .fullName),
                             _divider(),
                             _infoRow(
                                 Icons.school_outlined,
                                 'Batch',
                                 _matchCache[uid]!
-                                    .batch
-                                    .isEmpty
+                                        .batch
+                                        .isEmpty
                                     ? '—'
                                     : _matchCache[uid]!
                                         .batch),
@@ -1729,8 +1812,8 @@ class _UserVerificationScreenState
                                 Icons.book_outlined,
                                 'Course',
                                 _matchCache[uid]!
-                                    .course
-                                    .isEmpty
+                                        .course
+                                        .isEmpty
                                     ? '—'
                                     : _matchCache[uid]!
                                         .course),
@@ -1739,8 +1822,8 @@ class _UserVerificationScreenState
                                 Icons.email_outlined,
                                 'Email',
                                 _matchCache[uid]!
-                                    .email
-                                    .isEmpty
+                                        .email
+                                        .isEmpty
                                     ? '—'
                                     : _matchCache[uid]!
                                         .email),
@@ -1749,8 +1832,8 @@ class _UserVerificationScreenState
                                 Icons.badge_outlined,
                                 'Student ID',
                                 _matchCache[uid]!
-                                    .studentId
-                                    .isEmpty
+                                        .studentId
+                                        .isEmpty
                                     ? '—'
                                     : _matchCache[uid]!
                                         .studentId),
@@ -1765,7 +1848,8 @@ class _UserVerificationScreenState
                       const SizedBox(height: 16),
                       Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.all(16),
+                        padding:
+                            const EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: AppColors.softWhite,
                           borderRadius:
@@ -1791,7 +1875,8 @@ class _UserVerificationScreenState
                               user['about'].toString(),
                               style: GoogleFonts.inter(
                                   fontSize: 13,
-                                  color: AppColors.darkText,
+                                  color:
+                                      AppColors.darkText,
                                   height: 1.5),
                             ),
                           ],
@@ -1828,15 +1913,13 @@ class _UserVerificationScreenState
                                   Colors.green,
                               foregroundColor:
                                   Colors.white,
-                              padding:
-                                  const EdgeInsets.symmetric(
-                                      vertical: 12),
-                              shape:
-                                  RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius
-                                              .circular(
-                                                  10)),
+                              padding: const EdgeInsets
+                                  .symmetric(
+                                  vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius:
+                                      BorderRadius
+                                          .circular(10)),
                             ),
                           ),
                         ),
@@ -1860,15 +1943,13 @@ class _UserVerificationScreenState
                                   AppColors.brandRed,
                               foregroundColor:
                                   Colors.white,
-                              padding:
-                                  const EdgeInsets.symmetric(
-                                      vertical: 12),
-                              shape:
-                                  RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius
-                                              .circular(
-                                                  10)),
+                              padding: const EdgeInsets
+                                  .symmetric(
+                                  vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius:
+                                      BorderRadius
+                                          .circular(10)),
                             ),
                           ),
                         ),
@@ -1891,8 +1972,7 @@ class _UserVerificationScreenState
                           color: Colors.blue,
                           onTap: () {
                             Navigator.pop(ctx);
-                            _changeRole(
-                                uid,
+                            _changeRole(uid,
                                 user['role'].toString());
                           },
                         ),
@@ -1968,7 +2048,8 @@ class _UserVerificationScreenState
                     hintStyle: GoogleFonts.inter(
                         color: AppColors.mutedText,
                         fontSize: 12),
-                    prefixIcon: const Icon(Icons.search,
+                    prefixIcon: const Icon(
+                        Icons.search,
                         color: AppColors.brandRed,
                         size: 16),
                     filled: true,
@@ -2030,7 +2111,8 @@ class _UserVerificationScreenState
 
   Widget _buildUploadsView() {
     if (_selectedUploadId != null) {
-      return _buildBatchRecordsView(_selectedUploadId!);
+      return _buildBatchRecordsView(
+          _selectedUploadId!);
     }
 
     return StreamBuilder<List<RegistryUpload>>(
@@ -2049,12 +2131,13 @@ class _UserVerificationScreenState
                       color: Colors.red)));
         }
 
-        final uploads = (snap.data ?? []).where((u) {
+        final uploads =
+            (snap.data ?? []).where((u) {
           if (_registrySearch.isEmpty) return true;
           return u.fileName
                   .toLowerCase()
-                  .contains(
-                      _registrySearch.toLowerCase()) ||
+                  .contains(_registrySearch
+                      .toLowerCase()) ||
               u.uploadedByName
                   .toLowerCase()
                   .contains(
@@ -2094,8 +2177,9 @@ class _UserVerificationScreenState
             scrollDirection: Axis.horizontal,
             child: DataTable(
               columnSpacing: 20,
-              headingRowColor: WidgetStatePropertyAll(
-                  AppColors.softWhite),
+              headingRowColor:
+                  WidgetStatePropertyAll(
+                      AppColors.softWhite),
               headingTextStyle: GoogleFonts.inter(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
@@ -2105,15 +2189,19 @@ class _UserVerificationScreenState
                   fontSize: 13,
                   color: AppColors.darkText),
               columns: const [
-                DataColumn(label: Text('FILE NAME')),
-                DataColumn(label: Text('RECORDS')),
-                DataColumn(label: Text('MATCHED')),
+                DataColumn(
+                    label: Text('FILE NAME')),
+                DataColumn(
+                    label: Text('RECORDS')),
+                DataColumn(
+                    label: Text('MATCHED')),
                 DataColumn(label: Text('STATUS')),
                 DataColumn(
                     label: Text('UPLOADED BY')),
                 DataColumn(
                     label: Text('UPLOADED AT')),
-                DataColumn(label: Text('ACTIONS')),
+                DataColumn(
+                    label: Text('ACTIONS')),
               ],
               rows: uploads.map((upload) {
                 final matchPct =
@@ -2135,7 +2223,8 @@ class _UserVerificationScreenState
                     const SizedBox(width: 8),
                     Text(upload.fileName,
                         style: GoogleFonts.inter(
-                            fontWeight: FontWeight.w600,
+                            fontWeight:
+                                FontWeight.w600,
                             fontSize: 13)),
                   ])),
                   DataCell(Text(
@@ -2176,7 +2265,8 @@ class _UserVerificationScreenState
                                   upload.id),
                           child: Container(
                             padding:
-                                const EdgeInsets.all(6),
+                                const EdgeInsets.all(
+                                    6),
                             decoration: BoxDecoration(
                               color: AppColors.brandRed
                                   .withOpacity(0.08),
@@ -2185,8 +2275,10 @@ class _UserVerificationScreenState
                                       6),
                             ),
                             child: const Icon(
-                                Icons.list_alt_outlined,
-                                color: AppColors.brandRed,
+                                Icons
+                                    .list_alt_outlined,
+                                color:
+                                    AppColors.brandRed,
                                 size: 16),
                           ),
                         ),
@@ -2200,7 +2292,8 @@ class _UserVerificationScreenState
                                   upload),
                           child: Container(
                             padding:
-                                const EdgeInsets.all(6),
+                                const EdgeInsets.all(
+                                    6),
                             decoration: BoxDecoration(
                               color: Colors.red
                                   .withOpacity(0.08),
@@ -2228,7 +2321,8 @@ class _UserVerificationScreenState
 
   Widget _buildBatchRecordsView(String uploadId) {
     return StreamBuilder<List<AlumniRecord>>(
-      stream: _registryService.recordsStream(uploadId),
+      stream:
+          _registryService.recordsStream(uploadId),
       builder: (context, snap) {
         if (snap.connectionState ==
             ConnectionState.waiting) {
@@ -2241,7 +2335,9 @@ class _UserVerificationScreenState
         final records = allRecs.where((r) {
           if (_registrySearch.isEmpty) return true;
           final q = _registrySearch.toLowerCase();
-          return r.fullName.toLowerCase().contains(q) ||
+          return r.fullName
+                  .toLowerCase()
+                  .contains(q) ||
               r.batch.contains(q) ||
               r.course.toLowerCase().contains(q) ||
               r.email.toLowerCase().contains(q) ||
@@ -2256,8 +2352,8 @@ class _UserVerificationScreenState
                   horizontal: 24, vertical: 10),
               child: Row(children: [
                 TextButton.icon(
-                  onPressed: () => setState(
-                      () => _selectedUploadId = null),
+                  onPressed: () => setState(() =>
+                      _selectedUploadId = null),
                   icon: const Icon(Icons.arrow_back,
                       size: 16,
                       color: AppColors.brandRed),
@@ -2295,7 +2391,8 @@ class _UserVerificationScreenState
             Expanded(
               child: records.isEmpty
                   ? Center(
-                      child: Text('No records found.',
+                      child: Text(
+                          'No records found.',
                           style: GoogleFonts.inter(
                               color:
                                   AppColors.mutedText)))
@@ -2315,8 +2412,8 @@ class _UserVerificationScreenState
                                   fontSize: 11,
                                   fontWeight:
                                       FontWeight.w700,
-                                  color: AppColors
-                                      .mutedText,
+                                  color:
+                                      AppColors.mutedText,
                                   letterSpacing: 0.5),
                           dataTextStyle:
                               GoogleFonts.inter(
@@ -2341,7 +2438,8 @@ class _UserVerificationScreenState
                           ],
                           rows: records.map((r) {
                             return DataRow(cells: [
-                              DataCell(Text(r.fullName,
+                              DataCell(Text(
+                                  r.fullName,
                                   style: GoogleFonts
                                       .inter(
                                           fontWeight:
@@ -2355,8 +2453,9 @@ class _UserVerificationScreenState
                                   r.course.isEmpty
                                       ? '—'
                                       : r.course,
-                                  overflow: TextOverflow
-                                      .ellipsis)),
+                                  overflow:
+                                      TextOverflow
+                                          .ellipsis)),
                               DataCell(Text(
                                   r.email.isEmpty
                                       ? '—'
@@ -2368,7 +2467,8 @@ class _UserVerificationScreenState
                               DataCell(r.isMatched
                                   ? _badge('MATCHED',
                                       Colors.green)
-                                  : _badge('UNMATCHED',
+                                  : _badge(
+                                      'UNMATCHED',
                                       Colors.orange)),
                             ]);
                           }).toList(),
@@ -2429,8 +2529,9 @@ class _UserVerificationScreenState
             scrollDirection: Axis.horizontal,
             child: DataTable(
               columnSpacing: 20,
-              headingRowColor: WidgetStatePropertyAll(
-                  AppColors.softWhite),
+              headingRowColor:
+                  WidgetStatePropertyAll(
+                      AppColors.softWhite),
               headingTextStyle: GoogleFonts.inter(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
@@ -2440,7 +2541,8 @@ class _UserVerificationScreenState
                   fontSize: 13,
                   color: AppColors.darkText),
               columns: const [
-                DataColumn(label: Text('FULL NAME')),
+                DataColumn(
+                    label: Text('FULL NAME')),
                 DataColumn(label: Text('BATCH')),
                 DataColumn(label: Text('COURSE')),
                 DataColumn(label: Text('EMAIL')),
@@ -2456,8 +2558,9 @@ class _UserVerificationScreenState
                       style: GoogleFonts.inter(
                           fontWeight:
                               FontWeight.w600))),
-                  DataCell(Text(
-                      r.batch.isEmpty ? '—' : r.batch)),
+                  DataCell(Text(r.batch.isEmpty
+                      ? '—'
+                      : r.batch)),
                   DataCell(Text(
                       r.course.isEmpty
                           ? '—'
@@ -2465,10 +2568,13 @@ class _UserVerificationScreenState
                       overflow:
                           TextOverflow.ellipsis)),
                   DataCell(Text(
-                      r.email.isEmpty ? '—' : r.email)),
-                  DataCell(Text(r.studentId.isEmpty
-                      ? '—'
-                      : r.studentId)),
+                      r.email.isEmpty
+                          ? '—'
+                          : r.email)),
+                  DataCell(Text(
+                      r.studentId.isEmpty
+                          ? '—'
+                          : r.studentId)),
                   DataCell(Text(
                     r.uploadBatchId.length > 8
                         ? '...${r.uploadBatchId.substring(r.uploadBatchId.length - 8)}'
@@ -2478,9 +2584,11 @@ class _UserVerificationScreenState
                         color: AppColors.mutedText),
                   )),
                   DataCell(r.isMatched
-                      ? _badge('MATCHED', Colors.green)
+                      ? _badge(
+                          'MATCHED', Colors.green)
                       : _badge(
-                          'UNMATCHED', Colors.orange)),
+                          'UNMATCHED',
+                          Colors.orange)),
                 ]);
               }).toList(),
             ),
@@ -2538,8 +2646,8 @@ class _UserVerificationScreenState
       decoration: BoxDecoration(
         color: color.withOpacity(0.08),
         borderRadius: BorderRadius.circular(20),
-        border:
-            Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(
+            color: color.withOpacity(0.2)),
       ),
       child: Text('$label ($count)',
           style: GoogleFonts.inter(
@@ -2638,13 +2746,13 @@ class _UserVerificationScreenState
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(
+            vertical: 10),
         decoration: BoxDecoration(
           color: color.withOpacity(0.08),
           borderRadius: BorderRadius.circular(10),
-          border:
-              Border.all(color: color.withOpacity(0.2)),
+          border: Border.all(
+              color: color.withOpacity(0.2)),
         ),
         child: Column(children: [
           Icon(icon, color: color, size: 20),
@@ -2668,6 +2776,7 @@ class _UserVerificationScreenState
       case 'suspended':
         return Colors.red.shade700;
       case 'rejected':
+      case 'denied':
         return Colors.red;
       default:
         return AppColors.mutedText;
@@ -2836,13 +2945,13 @@ class _UserVerificationScreenState
                                     fontWeight:
                                         FontWeight.bold),
                                 maxLines: 1,
-                                overflow: TextOverflow
-                                    .ellipsis),
+                                overflow:
+                                    TextOverflow.ellipsis),
                             Text(_adminRole,
                                 style: GoogleFonts.inter(
                                     fontSize: 9,
-                                    color: AppColors
-                                        .mutedText)),
+                                    color:
+                                        AppColors.mutedText)),
                           ],
                         ),
                       ),
@@ -2885,7 +2994,6 @@ class _UserVerificationScreenState
           Expanded(
             child: Column(
               children: [
-                // ─── Top bar ───
                 Container(
                   color: Colors.white,
                   padding: const EdgeInsets.symmetric(
@@ -2907,14 +3015,16 @@ class _UserVerificationScreenState
                                       fontSize: 32,
                                       fontWeight:
                                           FontWeight.w400,
-                                      color: AppColors
-                                          .darkText)),
+                                      color:
+                                          AppColors.darkText)),
                           Text(
                               _currentTab == 4
-                                  ? 'Upload and manage the official alumni registry for auto-verification.'
+                                  ? 'Upload and manage the official alumni registry.'
                                   : _currentTab == 3
-                                      ? 'Review applicants side-by-side with their matched registry records.'
-                                      : 'Verify identities and moderate community interactions.',
+                                      ? 'Review applicants side-by-side with registry records.'
+                                      : _currentTab == 1
+                                          ? 'Accounts that have been rejected or denied access.'
+                                          : 'Verify identities and moderate community interactions.',
                               style: GoogleFonts.inter(
                                   fontSize: 13,
                                   color:
@@ -2965,19 +3075,20 @@ class _UserVerificationScreenState
                           AppColors.mutedText),
                       const SizedBox(width: 10),
                       _statChip(
-                          'Pending',
-                          pendingUsers.length.toString(),
+                          'Queue',
+                          verificationQueue.length
+                              .toString(),
                           Colors.orange),
                       const SizedBox(width: 10),
                       _statChip(
-                          'Queue',
-                          verificationQueue.length
+                          'Rejected',
+                          rejectedUsers.length
                               .toString(),
                           AppColors.brandRed),
                     ]),
                   ),
 
-                // ─── Tabs + search ───
+                // ─── Tabs ───
                 Container(
                   color: AppColors.cardWhite,
                   padding: const EdgeInsets.fromLTRB(
@@ -2988,7 +3099,8 @@ class _UserVerificationScreenState
                       child: Row(children: [
                         _tabBtn('All Users', 0),
                         const SizedBox(width: 8),
-                        _tabBtn('Pending', 1),
+                        // ─── Tab 1 is now Rejected ───
+                        _tabBtn('Rejected', 1),
                         const SizedBox(width: 8),
                         _tabBtn('Recent Logins', 2),
                         const SizedBox(width: 8),
@@ -3016,7 +3128,8 @@ class _UserVerificationScreenState
                                 fontSize: 13),
                             prefixIcon: const Icon(
                                 Icons.search,
-                                color: AppColors.brandRed,
+                                color:
+                                    AppColors.brandRed,
                                 size: 18),
                             filled: true,
                             fillColor:
@@ -3040,7 +3153,6 @@ class _UserVerificationScreenState
                   ]),
                 ),
 
-                // ─── Content ───
                 Expanded(
                   child: _currentTab == 4
                       ? _buildRegistryTab()
@@ -3076,14 +3188,17 @@ class _UserVerificationScreenState
     if (data.isEmpty) {
       return Center(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment:
+              MainAxisAlignment.center,
           children: [
             const Icon(Icons.people_outline,
                 size: 72,
                 color: AppColors.borderSubtle),
             const SizedBox(height: 16),
             Text(
-              'No users found',
+              _currentTab == 1
+                  ? 'No rejected accounts'
+                  : 'No users found',
               style: GoogleFonts.cormorantGaramond(
                   fontSize: 22,
                   color: AppColors.darkText),
@@ -3100,15 +3215,16 @@ class _UserVerificationScreenState
         scrollDirection: Axis.horizontal,
         child: DataTable(
           columnSpacing: 20,
-          headingRowColor:
-              WidgetStatePropertyAll(AppColors.softWhite),
+          headingRowColor: WidgetStatePropertyAll(
+              AppColors.softWhite),
           headingTextStyle: GoogleFonts.inter(
               fontSize: 11,
               fontWeight: FontWeight.w700,
               color: AppColors.mutedText,
               letterSpacing: 0.5),
           dataTextStyle: GoogleFonts.inter(
-              fontSize: 13, color: AppColors.darkText),
+              fontSize: 13,
+              color: AppColors.darkText),
           columns: const [
             DataColumn(label: Text('USER')),
             DataColumn(label: Text('ROLE')),
@@ -3124,37 +3240,41 @@ class _UserVerificationScreenState
                 user['createdAt'] as DateTime?;
             final lastLogin =
                 user['lastLogin'] as DateTime?;
-            final status = user['status'].toString();
+            final status =
+                user['status'].toString();
             final verStatus =
                 user['verificationStatus'].toString();
+            
+
             return DataRow(cells: [
               DataCell(Row(children: [
                 CircleAvatar(
                   radius: 18,
-                  backgroundColor:
-                      AppColors.brandRed.withOpacity(0.1),
+                  backgroundColor: AppColors.brandRed
+                      .withOpacity(0.1),
                   backgroundImage:
                       user['profilePictureUrl'] != null
                           ? NetworkImage(
                               user['profilePictureUrl']
                                   .toString())
                           : null,
-                  child: user['profilePictureUrl'] ==
-                          null
-                      ? Text(
-                          user['name']
-                                  .toString()
-                                  .isNotEmpty
-                              ? user['name']
-                                  .toString()[0]
-                                  .toUpperCase()
-                              : '?',
-                          style: GoogleFonts.inter(
-                              color: AppColors.brandRed,
-                              fontSize: 12,
-                              fontWeight:
-                                  FontWeight.w700))
-                      : null,
+                  child:
+                      user['profilePictureUrl'] == null
+                          ? Text(
+                              user['name']
+                                      .toString()
+                                      .isNotEmpty
+                                  ? user['name']
+                                      .toString()[0]
+                                      .toUpperCase()
+                                  : '?',
+                              style: GoogleFonts.inter(
+                                  color:
+                                      AppColors.brandRed,
+                                  fontSize: 12,
+                                  fontWeight:
+                                      FontWeight.w700))
+                          : null,
                 ),
                 const SizedBox(width: 10),
                 Column(
@@ -3163,7 +3283,8 @@ class _UserVerificationScreenState
                     children: [
                       Text(user['name'].toString(),
                           style: GoogleFonts.inter(
-                              fontWeight: FontWeight.w600,
+                              fontWeight:
+                                  FontWeight.w600,
                               fontSize: 13)),
                       Text(user['email'].toString(),
                           style: GoogleFonts.inter(
@@ -3177,9 +3298,11 @@ class _UserVerificationScreenState
                       .toString()
                       .toUpperCase(),
                   AppColors.brandRed)),
-              DataCell(_badge(status.toUpperCase(),
+              DataCell(_badge(
+                  status.toUpperCase(),
                   _statusColor(status))),
-              DataCell(_badge(verStatus.toUpperCase(),
+              DataCell(_badge(
+                  verStatus.toUpperCase(),
                   _verColor(verStatus))),
               DataCell(
                   Text(user['batch'].toString())),
@@ -3256,13 +3379,15 @@ class _UserVerificationScreenState
   Widget _tabBtn(String label, int index) {
     final active = _currentTab == index;
     return GestureDetector(
-      onTap: () => setState(() => _currentTab = index),
+      onTap: () =>
+          setState(() => _currentTab = index),
       child: Container(
         padding: const EdgeInsets.symmetric(
             horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color:
-              active ? AppColors.brandRed : Colors.white,
+          color: active
+              ? AppColors.brandRed
+              : Colors.white,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
               color: active

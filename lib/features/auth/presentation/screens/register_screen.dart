@@ -27,6 +27,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   // ─── Personal info ───
   final _batchCtrl = TextEditingController();
   final _courseCtrl = TextEditingController();
+  final _studentIdCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _locationCtrl = TextEditingController();
   final _occupationCtrl = TextEditingController();
@@ -55,6 +56,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _confirmPasswordCtrl.dispose();
     _batchCtrl.dispose();
     _courseCtrl.dispose();
+    _studentIdCtrl.dispose();
     _phoneCtrl.dispose();
     _locationCtrl.dispose();
     _occupationCtrl.dispose();
@@ -173,6 +175,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         batch: _batchCtrl.text.trim(),
         course: _courseCtrl.text.trim(),
         email: _emailCtrl.text.trim(),
+        studentId: _studentIdCtrl.text.trim(),
       );
 
       if (mounted) {
@@ -237,6 +240,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final verificationStatus =
           isAutoVerified ? 'verified' : 'pending';
 
+      final studentId = _studentIdCtrl.text.trim();
+
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
@@ -246,6 +251,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'lastName': _lastNameCtrl.text.trim(),
         'name': fullName,
         'email': user.email?.trim().toLowerCase(),
+        'studentId': studentId,
         'phone': _phoneCtrl.text.trim(),
         'location': _locationCtrl.text.trim(),
         'batch': _batchCtrl.text.trim(),
@@ -387,6 +393,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         _batchCtrl.text.trim()),
                     _reviewRow('Course',
                         _courseCtrl.text.trim()),
+                    if (studentId.isNotEmpty)
+                      _reviewRow('Student ID', studentId),
                     _reviewRow('Status',
                         isAutoVerified
                             ? '✓ Auto-Verified'
@@ -896,6 +904,30 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     })),
           ),
         ]),
+        const SizedBox(height: 16),
+
+        // ─── Student ID field ───
+        _field(
+          _studentIdCtrl,
+          'STUDENT ID (OPTIONAL)',
+          'e.g. 2015-0001',
+          prefixIcon: Icons.badge_outlined,
+          onChanged: (_) => setState(() {
+            _registryChecked = false;
+            _matchResult = null;
+          }),
+        ),
+        const SizedBox(height: 6),
+        Padding(
+          padding: const EdgeInsets.only(left: 4),
+          child: Text(
+            'Providing your Student ID improves registry matching accuracy.',
+            style: GoogleFonts.inter(
+                fontSize: 11,
+                color: AppColors.mutedText,
+                height: 1.4),
+          ),
+        ),
 
         const SizedBox(height: 16),
 
@@ -1056,6 +1088,45 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
             ),
           ]),
+
+          // ─── Confidence bar ───
+          if (isMatch) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: confidence,
+                    minHeight: 6,
+                    backgroundColor:
+                        Colors.green.withOpacity(0.15),
+                    valueColor:
+                        AlwaysStoppedAnimation<Color>(
+                      confidence >= 0.85
+                          ? Colors.green
+                          : confidence >= 0.65
+                              ? Colors.lightGreen
+                              : Colors.orange,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                '$confidencePct%',
+                style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: confidence >= 0.85
+                        ? Colors.green.shade700
+                        : confidence >= 0.65
+                            ? Colors.lightGreen.shade700
+                            : Colors.orange.shade700),
+              ),
+            ]),
+          ],
+
           const SizedBox(height: 6),
 
           if (isMatch && record != null) ...[
@@ -1088,6 +1159,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   if (record.course.isNotEmpty)
                     _matchRow(Icons.book_outlined,
                         record.course),
+                  if (record.studentId.isNotEmpty)
+                    _matchRow(Icons.badge_outlined,
+                        'ID: ${record.studentId}'),
                 ],
               ),
             ),
@@ -1138,6 +1212,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final isAutoVerified =
         _matchResult?.isMatch == true &&
             (_matchResult?.confidence ?? 0) >= 0.65;
+    final studentId = _studentIdCtrl.text.trim();
+    final confidencePct = _matchResult != null
+        ? (_matchResult!.confidence * 100).toStringAsFixed(0)
+        : '0';
 
     return Column(
       key: key,
@@ -1191,7 +1269,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 children: [
                   Text(
                     isAutoVerified
-                        ? 'Auto-Verification Ready'
+                        ? 'Auto-Verification Ready ($confidencePct% match)'
                         : 'Manual Review Required',
                     style: GoogleFonts.inter(
                         fontSize: 12,
@@ -1225,10 +1303,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _reviewSection('ACADEMIC', [
           ['Batch Year', _batchCtrl.text.trim()],
           ['Course', _courseCtrl.text.trim()],
+          if (studentId.isNotEmpty)
+            ['Student ID', studentId],
           [
             'Registry',
             isAutoVerified
-                ? '✓ Matched'
+                ? '✓ Matched ($confidencePct%)'
                 : 'Not matched'
           ],
         ]),
@@ -1383,7 +1463,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(children: [
         SizedBox(
-          width: 60,
+          width: 72,
           child: Text(label,
               style: GoogleFonts.inter(
                   fontSize: 11,
@@ -1424,7 +1504,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Row(children: [
                   SizedBox(
-                    width: 72,
+                    width: 80,
                     child: Text(row[0],
                         style: GoogleFonts.inter(
                             fontSize: 11,

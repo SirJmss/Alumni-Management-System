@@ -14,18 +14,19 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailCtrl = TextEditingController();
+  final _identifierCtrl = TextEditingController(); // email OR student ID
   final _passwordCtrl = TextEditingController();
 
   bool _isLoading = false;
   bool _obscure = true;
   bool _staySignedIn = false;
-  String? _emailError;
+  bool _useStudentId = false; // toggle between email / student ID login
+  String? _identifierError;
   String? _passwordError;
 
   @override
   void dispose() {
-    _emailCtrl.dispose();
+    _identifierCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
   }
@@ -44,18 +45,64 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Future<void> _forgotPassword() async {
-    final email = _emailCtrl.text.trim();
-    if (email.isEmpty) {
-      setState(() =>
-          _emailError = 'Enter your email first to reset password');
-      return;
+  // ══════════════════════════════════════════
+  //  LOOK UP EMAIL FROM STUDENT ID
+  // ══════════════════════════════════════════
+
+  /// Queries Firestore for a user whose studentId matches
+  /// the provided value. Returns the email string or null.
+  Future<String?> _resolveEmailFromStudentId(
+      String studentId) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .where('studentId', isEqualTo: studentId.trim())
+          .limit(1)
+          .get();
+
+      if (snap.docs.isEmpty) return null;
+      final data = snap.docs.first.data();
+      return data['email']?.toString();
+    } catch (_) {
+      return null;
     }
-    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-        .hasMatch(email)) {
-      setState(
-          () => _emailError = 'Enter a valid email address');
-      return;
+  }
+
+  // ══════════════════════════════════════════
+  //  FORGOT PASSWORD
+  // ══════════════════════════════════════════
+
+  Future<void> _forgotPassword() async {
+    // If using student ID, we need to resolve the email first
+    String email = _identifierCtrl.text.trim();
+
+    if (_useStudentId) {
+      if (email.isEmpty) {
+        setState(() =>
+            _identifierError = 'Enter your Student ID first');
+        return;
+      }
+      setState(() => _isLoading = true);
+      final resolved = await _resolveEmailFromStudentId(email);
+      setState(() => _isLoading = false);
+      if (resolved == null) {
+        setState(() => _identifierError =
+            'No account found with this Student ID');
+        return;
+      }
+      email = resolved;
+    } else {
+      if (email.isEmpty) {
+        setState(() =>
+            _identifierError = 'Enter your email first to reset password');
+        return;
+      }
+      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
+          .hasMatch(email)) {
+        setState(
+            () => _identifierError = 'Enter a valid email address');
+        return;
+      }
     }
 
     try {
@@ -68,9 +115,13 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // ══════════════════════════════════════════
+  //  LOGIN
+  // ══════════════════════════════════════════
+
   Future<void> _login() async {
     setState(() {
-      _emailError = null;
+      _identifierError = null;
       _passwordError = null;
     });
 
@@ -79,9 +130,26 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
+      String email = _identifierCtrl.text.trim();
+
+      // ─── Resolve Student ID → email ───
+      if (_useStudentId) {
+        final resolved =
+            await _resolveEmailFromStudentId(email);
+        if (resolved == null) {
+          setState(() {
+            _identifierError =
+                'No account found with this Student ID';
+            _isLoading = false;
+          });
+          return;
+        }
+        email = resolved;
+      }
+
       final credential = await FirebaseAuth.instance
           .signInWithEmailAndPassword(
-        email: _emailCtrl.text.trim(),
+        email: email,
         password: _passwordCtrl.text.trim(),
       );
 
@@ -170,8 +238,10 @@ class _LoginScreenState extends State<LoginScreen> {
       switch (e.code) {
         case 'user-not-found':
         case 'invalid-credential':
-          setState(() =>
-              _emailError = 'No account found with this email');
+          setState(() => _identifierError =
+              _useStudentId
+                  ? 'No account found with this Student ID'
+                  : 'No account found with this email');
           break;
         case 'wrong-password':
           setState(
@@ -179,7 +249,7 @@ class _LoginScreenState extends State<LoginScreen> {
           break;
         case 'invalid-email':
           setState(
-              () => _emailError = 'Invalid email format');
+              () => _identifierError = 'Invalid email format');
           break;
         case 'user-disabled':
           _showSnackBar('This account has been disabled.',
@@ -200,6 +270,10 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
+
+  // ══════════════════════════════════════════
+  //  BUILD
+  // ══════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -392,7 +466,168 @@ class _LoginScreenState extends State<LoginScreen> {
                           height: 1.5),
                     ),
 
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 28),
+
+                    // ─── Login method toggle ───
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: AppColors.softWhite,
+                        borderRadius:
+                            BorderRadius.circular(10),
+                        border: Border.all(
+                            color: AppColors.borderSubtle),
+                      ),
+                      child: Row(children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              if (_useStudentId) {
+                                setState(() {
+                                  _useStudentId = false;
+                                  _identifierCtrl.clear();
+                                  _identifierError = null;
+                                });
+                              }
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(
+                                  milliseconds: 200),
+                              padding:
+                                  const EdgeInsets.symmetric(
+                                      vertical: 8),
+                              decoration: BoxDecoration(
+                                color: !_useStudentId
+                                    ? Colors.white
+                                    : Colors.transparent,
+                                borderRadius:
+                                    BorderRadius.circular(7),
+                                boxShadow: !_useStudentId
+                                    ? [
+                                        BoxShadow(
+                                          color: Colors.black
+                                              .withOpacity(
+                                                  0.06),
+                                          blurRadius: 6,
+                                          offset:
+                                              const Offset(
+                                                  0, 1),
+                                        )
+                                      ]
+                                    : null,
+                              ),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment
+                                        .center,
+                                children: [
+                                  Icon(
+                                    Icons.email_outlined,
+                                    size: 14,
+                                    color: !_useStudentId
+                                        ? AppColors.brandRed
+                                        : AppColors
+                                            .mutedText,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text('Email',
+                                      style:
+                                          GoogleFonts.inter(
+                                        fontSize: 12,
+                                        fontWeight:
+                                            !_useStudentId
+                                                ? FontWeight
+                                                    .w700
+                                                : FontWeight
+                                                    .w400,
+                                        color:
+                                            !_useStudentId
+                                                ? AppColors
+                                                    .brandRed
+                                                : AppColors
+                                                    .mutedText,
+                                      )),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              if (!_useStudentId) {
+                                setState(() {
+                                  _useStudentId = true;
+                                  _identifierCtrl.clear();
+                                  _identifierError = null;
+                                });
+                              }
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(
+                                  milliseconds: 200),
+                              padding:
+                                  const EdgeInsets.symmetric(
+                                      vertical: 8),
+                              decoration: BoxDecoration(
+                                color: _useStudentId
+                                    ? Colors.white
+                                    : Colors.transparent,
+                                borderRadius:
+                                    BorderRadius.circular(7),
+                                boxShadow: _useStudentId
+                                    ? [
+                                        BoxShadow(
+                                          color: Colors.black
+                                              .withOpacity(
+                                                  0.06),
+                                          blurRadius: 6,
+                                          offset:
+                                              const Offset(
+                                                  0, 1),
+                                        )
+                                      ]
+                                    : null,
+                              ),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment
+                                        .center,
+                                children: [
+                                  Icon(
+                                    Icons.badge_outlined,
+                                    size: 14,
+                                    color: _useStudentId
+                                        ? AppColors.brandRed
+                                        : AppColors
+                                            .mutedText,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text('Student ID',
+                                      style:
+                                          GoogleFonts.inter(
+                                        fontSize: 12,
+                                        fontWeight:
+                                            _useStudentId
+                                                ? FontWeight
+                                                    .w700
+                                                : FontWeight
+                                                    .w400,
+                                        color: _useStudentId
+                                            ? AppColors
+                                                .brandRed
+                                            : AppColors
+                                                .mutedText,
+                                      )),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ]),
+                    ),
+
+                    const SizedBox(height: 28),
 
                     Form(
                       key: _formKey,
@@ -400,39 +635,17 @@ class _LoginScreenState extends State<LoginScreen> {
                         crossAxisAlignment:
                             CrossAxisAlignment.start,
                         children: [
-                          // ─── Email ───
-                          _label('EMAIL ADDRESS'),
-                          const SizedBox(height: 8),
-                          TextFormField(
-                            controller: _emailCtrl,
-                            keyboardType:
-                                TextInputType.emailAddress,
-                            textInputAction:
-                                TextInputAction.next,
-                            style: GoogleFonts.inter(
-                                fontSize: 14,
-                                color: AppColors.darkText),
-                            onChanged: (_) {
-                              if (_emailError != null) {
-                                setState(
-                                    () => _emailError = null);
-                              }
-                            },
-                            decoration:
-                                _inputDeco('e.g. juan@email.com',
-                                    errorText: _emailError),
-                            validator: (v) {
-                              if (v?.trim().isEmpty ??
-                                  true) {
-                                return 'Email is required';
-                              }
-                              if (!RegExp(
-                                      r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-                                  .hasMatch(v!.trim())) {
-                                return 'Enter a valid email address';
-                              }
-                              return null;
-                            },
+                          // ─── Email or Student ID ───
+                          AnimatedSwitcher(
+                            duration: const Duration(
+                                milliseconds: 200),
+                            child: _useStudentId
+                                ? _buildStudentIdField(
+                                    key: const ValueKey(
+                                        'studentId'))
+                                : _buildEmailField(
+                                    key: const ValueKey(
+                                        'email')),
                           ),
 
                           const SizedBox(height: 24),
@@ -628,6 +841,89 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  // ─── Email field ───
+  Widget _buildEmailField({Key? key}) {
+    return Column(
+      key: key,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _label('EMAIL ADDRESS'),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: _identifierCtrl,
+          keyboardType: TextInputType.emailAddress,
+          textInputAction: TextInputAction.next,
+          style: GoogleFonts.inter(
+              fontSize: 14, color: AppColors.darkText),
+          onChanged: (_) {
+            if (_identifierError != null) {
+              setState(() => _identifierError = null);
+            }
+          },
+          decoration: _inputDeco('e.g. juan@email.com',
+              errorText: _identifierError),
+          validator: (v) {
+            if (v?.trim().isEmpty ?? true) {
+              return 'Email is required';
+            }
+            if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
+                .hasMatch(v!.trim())) {
+              return 'Enter a valid email address';
+            }
+            return null;
+          },
+        ),
+      ],
+    );
+  }
+
+  // ─── Student ID field ───
+  Widget _buildStudentIdField({Key? key}) {
+    return Column(
+      key: key,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _label('STUDENT ID'),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: _identifierCtrl,
+          keyboardType: TextInputType.text,
+          textInputAction: TextInputAction.next,
+          style: GoogleFonts.inter(
+              fontSize: 14, color: AppColors.darkText),
+          onChanged: (_) {
+            if (_identifierError != null) {
+              setState(() => _identifierError = null);
+            }
+          },
+          decoration: _inputDeco(
+            'e.g. 2015-0001',
+            prefixIcon: Icons.badge_outlined,
+            errorText: _identifierError,
+          ),
+          validator: (v) {
+            if (v?.trim().isEmpty ?? true) {
+              return 'Student ID is required';
+            }
+            return null;
+          },
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Enter the Student ID you registered with.',
+          style: GoogleFonts.inter(
+              fontSize: 11,
+              color: AppColors.mutedText,
+              height: 1.4),
+        ),
+      ],
+    );
+  }
+
+  // ══════════════════════════════════════════
+  //  SHARED WIDGETS
+  // ══════════════════════════════════════════
+
   Widget _label(String text) {
     return Text(text,
         style: GoogleFonts.inter(
@@ -637,8 +933,12 @@ class _LoginScreenState extends State<LoginScreen> {
             color: AppColors.mutedText));
   }
 
-  InputDecoration _inputDeco(String hint,
-      {bool isPassword = false, String? errorText}) {
+  InputDecoration _inputDeco(
+    String hint, {
+    bool isPassword = false,
+    String? errorText,
+    IconData? prefixIcon,
+  }) {
     return InputDecoration(
       hintText: hint,
       hintStyle: GoogleFonts.inter(
@@ -650,6 +950,10 @@ class _LoginScreenState extends State<LoginScreen> {
           GoogleFonts.inter(fontSize: 11, color: Colors.red),
       filled: true,
       fillColor: AppColors.softWhite,
+      prefixIcon: prefixIcon != null
+          ? Icon(prefixIcon,
+              color: AppColors.mutedText, size: 18)
+          : null,
       suffixIcon: isPassword
           ? IconButton(
               icon: Icon(
