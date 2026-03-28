@@ -16,6 +16,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  // ─── User profile summary ────────────────────────────────────────────────
   String userName = 'Guest';
   String userRole = 'Alumni';
   String userBatch = '';
@@ -24,11 +25,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? userPhotoUrl;
   bool isLoadingProfile = true;
 
+  // ─── Key metrics ─────────────────────────────────────────────────────────
   int totalAlumni = 0;
   int upcomingEvents = 0;
   int activeCourses = 0;
-  int unreadMessages = 0;
 
+  // ─── Content previews ────────────────────────────────────────────────────
   List<Map<String, dynamic>> recentOpportunities = [];
   List<Map<String, dynamic>> upcomingCalendar = [];
   List<Map<String, dynamic>> nearbyAlumni = [];
@@ -49,15 +51,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
       errorMessage = null;
     });
 
-    await Future.wait([
-      _loadUserProfile(),
-      _loadDashboardAggregates(),
-      _loadRecentOpportunities(),
-      _loadUpcomingCalendar(),
-      _loadNearbyAlumni(),
-    ]);
-
-    if (mounted) {
+    try {
+      await Future.wait([
+        _loadUserProfile(),
+        _loadDashboardAggregates(),
+        _loadRecentOpportunities(),
+        _loadUpcomingCalendar(),
+        _loadNearbyAlumni(),
+      ]);
+    } finally {
+      if (!mounted) return;
       setState(() {
         isLoadingProfile = false;
         isLoadingData = false;
@@ -67,33 +70,66 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadUserProfile() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      setState(() {
+        userName = 'Guest';
+        userRole = 'Visitor';
+      });
+      return;
+    }
+
     try {
       final doc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
-      if (doc.exists) {
-        final data = doc.data()!;
+
+      if (!doc.exists) {
         setState(() {
-          userName = data['fullName'] ??
-              data['name'] ??
-              user.displayName ??
-              'Guest';
-          userRole = data['role'] ?? 'Alumni';
-          userPhotoUrl =
-              data['profilePictureUrl'] ?? user.photoURL;
-          userBatch = data['batch']?.toString() ??
-              data['batchYear']?.toString() ??
-              '';
-          userCourse = data['course']?.toString() ??
-              data['program']?.toString() ??
-              '';
-          userLocation = data['location']?.toString() ?? '';
+          userName = user.displayName?.trim().isNotEmpty == true
+              ? user.displayName!.trim()
+              : 'Member';
+          userRole = 'Alumni';
+          userPhotoUrl = user.photoURL;
         });
+        return;
       }
-    } catch (e) {
-      debugPrint('Profile error: $e');
+
+      final data = doc.data() ?? <String, dynamic>{};
+
+      String _getStr(String key, {String fallback = ''}) {
+        final val = data[key]?.toString().trim();
+        return (val != null && val.isNotEmpty) ? val : fallback;
+      }
+
+      setState(() {
+        userName = _getStr(
+          'fullName',
+          fallback: _getStr(
+            'name',
+            fallback: user.displayName ?? 'Member',
+          ),
+        );
+
+        userRole = _getStr('role', fallback: 'Alumni');
+
+        final photo = _getStr('profilePictureUrl',
+            fallback: user.photoURL ?? '');
+        userPhotoUrl = photo.isNotEmpty ? photo : null;
+
+        userBatch =
+            _getStr('batch', fallback: _getStr('batchYear'));
+        userCourse =
+            _getStr('course', fallback: _getStr('program'));
+        userLocation = _getStr('location');
+      });
+    } catch (e, st) {
+      debugPrint('Profile error: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        errorMessage ??=
+            'We had trouble loading your profile. Pull to refresh to try again.';
+      });
     }
   }
 
@@ -101,6 +137,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final firestore = FirebaseFirestore.instance;
       final now = Timestamp.now();
+
       final results = await Future.wait([
         firestore.collection('users').count().get(),
         firestore
@@ -110,14 +147,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
             .get(),
         firestore.collection('courses').count().get(),
       ]);
+
+      if (!mounted) return;
       setState(() {
         totalAlumni = results[0].count ?? 0;
         upcomingEvents = results[1].count ?? 0;
         activeCourses = results[2].count ?? 0;
       });
-    } catch (e) {
-      setState(
-          () => errorMessage = 'Failed to load dashboard data');
+    } catch (e, st) {
+      debugPrint('Dashboard aggregates error: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        errorMessage ??=
+            'Some dashboard data could not be loaded. Pull to refresh to try again.';
+      });
     }
   }
 
@@ -125,93 +168,116 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final snap = await FirebaseFirestore.instance
           .collection('opportunities')
+          .where('isActive', isEqualTo: true)
           .orderBy('createdAt', descending: true)
           .limit(3)
           .get();
+
+      if (!mounted) return;
       setState(() {
         recentOpportunities = snap.docs.map((doc) {
           final data = doc.data();
+          String _get(String key, String fallback) {
+            final v = data[key]?.toString().trim();
+            return (v != null && v.isNotEmpty) ? v : fallback;
+          }
+
           return {
             'id': doc.id,
-            'title': data['title'] ?? 'Opportunity',
-            'type': data['type'] ?? 'Full-Time',
-            'location': data['location'] ?? 'Remote',
-            'company': data['company'] ?? 'Unknown',
+            'title': _get('title', 'Opportunity'),
+            'type': _get('type', 'Full-time'),
+            'location': _get('location', 'Remote'),
+            'company': _get('company', 'Confidential'),
           };
         }).toList();
       });
-    } catch (e) {
-      debugPrint('Opportunities error: $e');
+    } catch (e, st) {
+      debugPrint('Opportunities error: $e\n$st');
+      // Non-critical; keep dashboard usable.
     }
   }
 
   Future<void> _loadUpcomingCalendar() async {
     try {
+      final now = Timestamp.now();
       final snap = await FirebaseFirestore.instance
           .collection('events')
-          .where('startDate', isGreaterThan: Timestamp.now())
+          .where('startDate', isGreaterThan: now)
           .orderBy('startDate')
           .limit(3)
           .get();
+
+      if (!mounted) return;
       setState(() {
         upcomingCalendar = snap.docs.map((doc) {
           final data = doc.data();
-          final date =
-              (data['startDate'] as Timestamp?)?.toDate();
+          final ts = data['startDate'];
+          DateTime? date;
+          if (ts is Timestamp) date = ts.toDate();
+
+          final title = (data['title']?.toString().trim().isNotEmpty ?? false)
+              ? data['title'].toString().trim()
+              : 'Upcoming event';
+
           return {
             'id': doc.id,
-            'title': data['title'] ?? 'Event',
+            'title': title,
             'date': date != null
                 ? DateFormat('MMM dd').format(date)
                 : 'TBD',
-            'day': date != null
-                ? DateFormat('dd').format(date)
-                : '??',
-            'month': date != null
-                ? DateFormat('MMM').format(date)
-                : '',
-            'type': data['type'] ?? 'Campus Event',
+            'day': date != null ? DateFormat('dd').format(date) : '––',
+            'month':
+                date != null ? DateFormat('MMM').format(date) : '',
+            'type': data['type']?.toString() ?? 'Campus event',
             'event': {...data, 'id': doc.id},
           };
         }).toList();
       });
-    } catch (e) {
-      debugPrint('Calendar error: $e');
+    } catch (e, st) {
+      debugPrint('Calendar error: $e\n$st');
     }
   }
 
   Future<void> _loadNearbyAlumni() async {
     try {
+      final currentUid =
+          FirebaseAuth.instance.currentUser?.uid ?? '';
+
       final snap = await FirebaseFirestore.instance
           .collection('users')
           .where('role', isEqualTo: 'alumni')
-          .limit(10)
+          .limit(20)
           .get();
 
-      final currentUid =
-          FirebaseAuth.instance.currentUser?.uid;
+      if (!mounted) return;
+
       final filtered = snap.docs
           .where((d) => d.id != currentUid)
-          .take(5)
-          .map((d) => {
-                'uid': d.id,
-                'name': d.data()['name']?.toString() ??
-                    'Alumni',
-                'role': d.data()['headline']?.toString() ??
-                    d.data()['course']?.toString() ??
-                    'Alumni',
-                'year':
-                    d.data()['batch']?.toString() ?? '',
-                'avatarUrl': d
-                        .data()['profilePictureUrl']
-                        ?.toString() ??
-                    '',
-              })
+          .take(8)
+          .map((d) {
+            final data = d.data();
+            String _get(String key) =>
+                data[key]?.toString().trim() ?? '';
+
+            return {
+              'uid': d.id,
+              'name': _get('name').isNotEmpty
+                  ? _get('name')
+                  : 'Alumni',
+              'role': _get('headline').isNotEmpty
+                  ? _get('headline')
+                  : (_get('course').isNotEmpty
+                      ? _get('course')
+                      : 'Alumni'),
+              'year': _get('batch'),
+              'avatarUrl': _get('profilePictureUrl'),
+            };
+          })
           .toList();
 
       setState(() => nearbyAlumni = filtered);
-    } catch (e) {
-      debugPrint('Nearby alumni error: $e');
+    } catch (e, st) {
+      debugPrint('Nearby alumni error: $e\n$st');
     }
   }
 
@@ -263,28 +329,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final currentUid =
         FirebaseAuth.instance.currentUser?.uid ?? '';
 
+    String firstName() {
+      if (userName.trim().isEmpty) return 'there';
+      final parts = userName.trim().split(' ');
+      return parts.first;
+    }
+
     return Scaffold(
-      backgroundColor: const Color(0xFFFDFDFD),
+      backgroundColor: const Color(0xFFF6F6F7),
       appBar: AppBar(
         backgroundColor: Colors.white,
-        elevation: 0,
+        elevation: 0.5,
         centerTitle: false,
         iconTheme:
             const IconThemeData(color: AppColors.darkText),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'ALUMNI',
-              style: GoogleFonts.cormorantGaramond(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 4.0,
-                fontStyle: FontStyle.italic,
-                color: AppColors.brandRed,
-              ),
-            ),
-          ],
+        title: Text(
+          'Alumni',
+          style: GoogleFonts.cormorantGaramond(
+            fontSize: 22,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 2.0,
+            color: AppColors.brandRed,
+          ),
         ),
         actions: [
           StreamBuilder<int>(
@@ -298,9 +364,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   clipBehavior: Clip.none,
                   children: [
                     const Icon(
-                        Icons.notifications_none_rounded,
-                        color: AppColors.darkText,
-                        size: 24),
+                      Icons.notifications_none_rounded,
+                      color: AppColors.darkText,
+                      size: 24,
+                    ),
                     if (count > 0)
                       Positioned(
                         right: -2,
@@ -308,14 +375,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         child: Container(
                           padding: const EdgeInsets.all(4),
                           decoration: const BoxDecoration(
-                              color: AppColors.brandRed,
-                              shape: BoxShape.circle),
+                            color: AppColors.brandRed,
+                            shape: BoxShape.circle,
+                          ),
                           child: Text(
                             count > 99 ? '99+' : '$count',
                             style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 8,
-                                fontWeight: FontWeight.bold),
+                              color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                       ),
@@ -324,8 +393,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 onPressed: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                      builder: (_) =>
-                          const NotificationsScreen()),
+                    builder: (_) => const NotificationsScreen(),
+                  ),
                 ),
               );
             },
@@ -334,205 +403,278 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       drawer: _buildDrawer(),
-      body: isLoading
-          ? const Center(
-              child: CircularProgressIndicator(
-                  color: AppColors.brandRed, strokeWidth: 2))
-          : RefreshIndicator(
-              onRefresh: _loadAllData,
-              color: AppColors.brandRed,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 24, vertical: 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ─── Welcome ───
-                    Text(
-                      'Welcome home,\n${userName.split(' ').first}.',
-                      style: GoogleFonts.cormorantGaramond(
-                        fontSize: 42,
-                        height: 1.1,
-                        fontWeight: FontWeight.w300,
-                        fontStyle: FontStyle.italic,
-                        color: AppColors.darkText,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // ─── Real badges from Firestore ───
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        if (userBatch.isNotEmpty)
-                          _buildBadge(Icons.school_outlined,
-                              'Class of $userBatch'),
-                        if (userCourse.isNotEmpty)
-                          _buildBadge(
-                              Icons.auto_stories_outlined,
-                              userCourse),
-                        if (userLocation.isNotEmpty)
-                          _buildBadge(
-                              Icons.location_on_outlined,
-                              userLocation),
-                        _buildBadge(
-                            Icons.verified_user_outlined,
-                            userRole),
-                      ],
-                    ),
-                    const SizedBox(height: 40),
-
-                    // ─── Quick actions ───
-                    StreamBuilder<int>(
-                      stream:
-                          NotificationService.unreadCountStream(
-                              currentUid),
-                      builder: (context, snapshot) {
-                        final notifCount =
-                            snapshot.data ?? 0;
-                        return SizedBox(
-                          height: 90,
-                          child: ListView(
-                            scrollDirection: Axis.horizontal,
-                            children: [
-                              _buildActionCircle(
-                                'Network',
-                                Icons.people_outline,
-                                () => Navigator.pushNamed(
-                                    context, '/friends'),
-                              ),
-                              _buildActionCircle(
-                                'Messages',
-                                Icons.mail_outline,
-                                () => Navigator.pushNamed(
-                                    context, '/messages'),
-                                badge: unreadMessages,
-                              ),
-                              _buildActionCircle(
-                                'Alerts',
-                                Icons.notifications_none_rounded,
-                                () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                      builder: (_) =>
-                                          const NotificationsScreen()),
-                                ),
-                                badge: notifCount,
-                              ),
-                              _buildActionCircle(
-                                'Events',
-                                Icons.event_outlined,
-                                () => Navigator.pushNamed(
-                                    context, '/events'),
-                              ),
-                              _buildActionCircle(
-                                'Profile',
-                                Icons.edit_outlined,
-                                () => Navigator.pushNamed(
-                                    context, '/profile'),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 40),
-
-                    // ─── Stats ───
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 24),
-                      decoration: const BoxDecoration(
-                        border: Border(
-                          top: BorderSide(
-                              color: AppColors.borderSubtle,
-                              width: 0.5),
-                          bottom: BorderSide(
-                              color: AppColors.borderSubtle,
-                              width: 0.5),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment:
-                            MainAxisAlignment.spaceAround,
-                        children: [
-                          _buildStatItem(
-                              totalAlumni, 'Members'),
-                          Container(
-                              width: 0.5,
-                              height: 30,
-                              color: AppColors.borderSubtle),
-                          _buildStatItem(
-                              upcomingEvents, 'Events'),
-                          Container(
-                              width: 0.5,
-                              height: 30,
-                              color: AppColors.borderSubtle),
-                          _buildStatItem(
-                              activeCourses, 'Courses'),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 48),
-
-                    // ─── Friend requests banner ───
-                    _FriendRequestsBanner(
-                        currentUid: currentUid),
-
-                    // ─── Curated Opportunities ───
-                    _sectionHeader(
-                        'Curated Opportunities', 'VIEW ALL',
-                        onTap: () => Navigator.pushNamed(
-                            context, '/job_board')),
-                    const SizedBox(height: 20),
-                    if (recentOpportunities.isEmpty)
-                      _buildEmptyState(
-                          'No opportunities currently listed')
-                    else
-                      ...recentOpportunities
-                          .map(_opportunityCard),
-
-                    const SizedBox(height: 48),
-
-                    // ─── Calendar ───
-                    _sectionHeader('Your Calendar', 'ALL EVENTS',
-                        onTap: () => Navigator.pushNamed(
-                            context, '/events')),
-                    const SizedBox(height: 20),
-                    if (upcomingCalendar.isEmpty)
-                      _buildEmptyState('No upcoming events')
-                    else
-                      ...upcomingCalendar
-                          .map(_calendarCard),
-
-                    const SizedBox(height: 48),
-
-                    // ─── Nearby Alumni ───
-                    _sectionHeader(
-                        'Alumni Near You', 'DISCOVER',
-                        onTap: () => Navigator.pushNamed(
-                            context, '/friends')),
-                    const SizedBox(height: 24),
-                    if (nearbyAlumni.isEmpty)
-                      _buildEmptyState('No alumni found')
-                    else
-                      SizedBox(
-                        height: 120,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: nearbyAlumni.length,
-                          itemBuilder: (context, index) =>
-                              _nearbyAlumniCard(
-                                  nearbyAlumni[index]),
-                        ),
-                      ),
-                    const SizedBox(height: 60),
-                  ],
+      body: RefreshIndicator(
+        onRefresh: _loadAllData,
+        color: AppColors.brandRed,
+        child: isLoading
+            ? const Center(
+                child: CircularProgressIndicator(
+                  color: AppColors.brandRed,
+                  strokeWidth: 2.5,
                 ),
+              )
+            : CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                    sliver: SliverToBoxAdapter(
+                      child: _buildHeroSection(firstName()),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                    sliver: SliverToBoxAdapter(
+                      child: _buildQuickActionsRow(currentUid),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                    sliver: SliverToBoxAdapter(
+                      child: _buildMetricsRow(),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                    sliver: SliverToBoxAdapter(
+                      child: _FriendRequestsBanner(currentUid: currentUid),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                    sliver: SliverToBoxAdapter(
+                      child: _buildOpportunitiesSection(),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                    sliver: SliverToBoxAdapter(
+                      child: _buildCalendarSection(),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
+                    sliver: SliverToBoxAdapter(
+                      child: _buildNearbyAlumniSection(),
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  // ────────────────────────────────────────────────
+  // Section builders (for cleaner layout)
+  // ────────────────────────────────────────────────
+
+  Widget _buildHeroSection(String firstName) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Welcome back,',
+          style: GoogleFonts.inter(
+            fontSize: 13,
+            color: AppColors.mutedText,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          firstName,
+          style: GoogleFonts.cormorantGaramond(
+            fontSize: 36,
+            height: 1.0,
+            fontWeight: FontWeight.w600,
+            color: AppColors.darkText,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (userBatch.isNotEmpty)
+              _buildBadge(Icons.school_outlined, 'Class of $userBatch'),
+            if (userCourse.isNotEmpty)
+              _buildBadge(Icons.auto_stories_outlined, userCourse),
+            if (userLocation.isNotEmpty)
+              _buildBadge(Icons.location_on_outlined, userLocation),
+            _buildBadge(Icons.verified_user_outlined, userRole),
+          ],
+        ),
+        if (errorMessage != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: Colors.amber.shade200,
               ),
             ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 16,
+                  color: Colors.amber.shade700,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    errorMessage!,
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      color: Colors.amber.shade900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildQuickActionsRow(String currentUid) {
+    return StreamBuilder<int>(
+      stream: NotificationService.unreadCountStream(currentUid),
+      builder: (context, snapshot) {
+        final notifCount = snapshot.data ?? 0;
+        return SizedBox(
+          height: 90,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              _buildActionCircle(
+                'Network',
+                Icons.people_outline,
+                () => Navigator.pushNamed(context, '/friends'),
+              ),
+              _buildActionCircle(
+                'Messages',
+                Icons.mail_outline,
+                () => Navigator.pushNamed(context, '/messages'),
+              ),
+              _buildActionCircle(
+                'Alerts',
+                Icons.notifications_none_rounded,
+                () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const NotificationsScreen(),
+                  ),
+                ),
+                badge: notifCount,
+              ),
+              _buildActionCircle(
+                'Events',
+                Icons.event_outlined,
+                () => Navigator.pushNamed(context, '/events'),
+              ),
+              _buildActionCircle(
+                'Profile',
+                Icons.person_outline,
+                () => Navigator.pushNamed(context, '/profile'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMetricsRow() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.borderSubtle),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          _buildStatItem(totalAlumni, 'Members'),
+          Container(
+            width: 0.7,
+            height: 32,
+            color: AppColors.borderSubtle,
+          ),
+          _buildStatItem(upcomingEvents, 'Events'),
+          Container(
+            width: 0.7,
+            height: 32,
+            color: AppColors.borderSubtle,
+          ),
+          _buildStatItem(activeCourses, 'Courses'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOpportunitiesSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader(
+          'Recommended for you',
+          'VIEW ALL',
+          onTap: () => Navigator.pushNamed(context, '/job_board'),
+        ),
+        const SizedBox(height: 16),
+        if (recentOpportunities.isEmpty)
+          _buildEmptyState('No opportunities currently listed')
+        else
+          ...recentOpportunities.map(_opportunityCard),
+      ],
+    );
+  }
+
+  Widget _buildCalendarSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader(
+          'Your Calendar',
+          'ALL EVENTS',
+          onTap: () => Navigator.pushNamed(context, '/events'),
+        ),
+        const SizedBox(height: 20),
+        if (upcomingCalendar.isEmpty)
+          _buildEmptyState('No upcoming events')
+        else
+          ...upcomingCalendar.map(_calendarCard),
+      ],
+    );
+  }
+
+  Widget _buildNearbyAlumniSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader(
+          'Alumni Near You',
+          'DISCOVER',
+          onTap: () => Navigator.pushNamed(context, '/friends'),
+        ),
+        const SizedBox(height: 24),
+        if (nearbyAlumni.isEmpty)
+          _buildEmptyState('No alumni found')
+        else
+          SizedBox(
+            height: 120,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: nearbyAlumni.length,
+              itemBuilder: (context, index) =>
+                  _nearbyAlumniCard(nearbyAlumni[index]),
+            ),
+          ),
+      ],
     );
   }
 
