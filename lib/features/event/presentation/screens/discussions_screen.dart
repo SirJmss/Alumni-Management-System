@@ -211,33 +211,37 @@ class _DiscussionsScreenState
                                 }
 
                                 // ─── Spam check ───
-                                if (!isEdit) {
-                                  final recent = await FirebaseFirestore
-                                      .instance
-                                      .collection(
-                                          'discussions')
-                                      .where('authorId',
-                                          isEqualTo:
-                                              _currentUid)
-                                      .orderBy(
-                                          'createdAt',
-                                          descending: true)
-                                      .limit(1)
-                                      .get();
-                                  if (recent
-                                      .docs.isNotEmpty) {
-                                    final lastPost = (recent
-                                                .docs.first
-                                                .data()['createdAt']
-                                            as Timestamp?)
-                                        ?.toDate();
-                                    if (lastPost != null &&
-                                        DateTime.now().difference(lastPost).inSeconds > 30) {
+                                // Only run if creating a new post AND we know the current user ID.
+                                if (!isEdit && _currentUid != null) {
+                                  try {
+                                    final now = DateTime.now();
+                                    final cutoff =
+                                        Timestamp.fromDate(now.subtract(const Duration(seconds: 30)));
+
+                                    // Query only posts by this user, created in the last 30 seconds.
+                                    final recent = await FirebaseFirestore.instance
+                                        .collection('discussions')
+                                        .where('authorId', isEqualTo: _currentUid)
+                                        .where('createdAt', isGreaterThan: cutoff)
+                                        .orderBy('createdAt', descending: true)
+                                        .limit(1)
+                                        .get();
+
+                                    if (recent.docs.isNotEmpty) {
                                       _showSnackBar(
-                                          'Please wait before posting again',
-                                          isError: true);
+                                        'You are posting too quickly. Please wait a few seconds.',
+                                        isError: true,
+                                      );
                                       return;
                                     }
+                                  } on FirebaseException catch (e) {
+                                    // If the query fails (rules/index), log and skip spam check
+                                    // rather than crashing the UI.
+                                    debugPrint(
+                                      'Spam check FirebaseException (code=${e.code}): ${e.message}',
+                                    );
+                                  } catch (e) {
+                                    debugPrint('Spam check error: $e');
                                   }
                                 }
 
@@ -449,26 +453,27 @@ class _DiscussionsScreenState
     }
   }
 
-  // ─── Toggle like ───
-  Future<void> _toggleLike(
-      String id, int currentCount) async {
-    if (_currentUid == null) return;
-    final ref = FirebaseFirestore.instance
-        .collection('discussions')
-        .doc(id);
-    final likeRef =
-        ref.collection('likes').doc(_currentUid);
-    final liked = await likeRef.get();
+  // ─── Toggle like (on list card) ───
+  Future<void> _toggleLike(String id, int currentCount) async {
+    if (_currentUid == null || _currentUid!.isEmpty) {
+      _showSnackBar('Sign in to like discussions', isError: true);
+      return;
+    }
 
-    if (liked.exists) {
+    final ref =
+        FirebaseFirestore.instance.collection('discussions').doc(id);
+    final likeRef = ref.collection('likes').doc(_currentUid);
+    final likedSnap = await likeRef.get();
+
+    if (likedSnap.exists) {
       await likeRef.delete();
-      await ref.update(
-          {'likesCount': FieldValue.increment(-1)});
+      await ref.update({'likesCount': FieldValue.increment(-1)});
     } else {
-      await likeRef
-          .set({'likedAt': FieldValue.serverTimestamp()});
-      await ref.update(
-          {'likesCount': FieldValue.increment(1)});
+      await likeRef.set({
+        'uid': _currentUid,
+        'likedAt': FieldValue.serverTimestamp(),
+      });
+      await ref.update({'likesCount': FieldValue.increment(1)});
     }
   }
 
@@ -933,10 +938,14 @@ class _DiscussionsScreenState
                 radius: 14,
                 backgroundColor:
                     AppColors.brandRed.withOpacity(0.1),
-                backgroundImage: authorAvatar != null
+                backgroundImage: (authorAvatar != null &&
+                        authorAvatar.trim().isNotEmpty &&
+                        !authorAvatar.trim().toLowerCase().startsWith('file://'))
                     ? NetworkImage(authorAvatar)
                     : null,
-                child: authorAvatar == null
+                child: (authorAvatar == null ||
+                        authorAvatar.trim().isEmpty ||
+                        authorAvatar.trim().toLowerCase().startsWith('file://'))
                     ? Text(
                         authorName.isNotEmpty
                             ? authorName[0].toUpperCase()
@@ -976,18 +985,17 @@ class _DiscussionsScreenState
 
               // ─── Like ───
               GestureDetector(
-                onTap: () =>
-                    _toggleLike(id, likesCount),
+                onTap: () => _toggleLike(id, likesCount),
                 child: Row(children: [
                   StreamBuilder<DocumentSnapshot>(
-                    stream: _currentUid != null
+                    stream: _currentUid != null && _currentUid!.isNotEmpty
                         ? FirebaseFirestore.instance
                             .collection('discussions')
                             .doc(id)
                             .collection('likes')
                             .doc(_currentUid)
                             .snapshots()
-                        : null,
+                        : const Stream.empty(),
                     builder: (context, snap) {
                       final liked =
                           snap.data?.exists ?? false;
@@ -1150,7 +1158,7 @@ class _DiscussionsScreenState
           padding: const EdgeInsets.symmetric(
               horizontal: 14, vertical: 2),
           child: DropdownButtonFormField<String>(
-            value: value,
+            initialValue: value,
             decoration: const InputDecoration(
                 border: InputBorder.none),
             items: items
@@ -1283,15 +1291,22 @@ class _DiscussionDetailScreenState
   }
 
   Future<void> _postReply() async {
+    if (widget.currentUid.isEmpty) {
+      _showSnackBar('You must be signed in to reply', isError: true);
+      return;
+    }
+    if (_isLocked) {
+      _showSnackBar('This thread is locked', isError: true);
+      return;
+    }
+
     final body = _replyCtrl.text.trim();
     if (body.length < 2) {
-      _showSnackBar('Reply is too short',
-          isError: true);
+      _showSnackBar('Reply is too short', isError: true);
       return;
     }
     if (body.length > 1000) {
-      _showSnackBar('Reply cannot exceed 1000 characters',
-          isError: true);
+      _showSnackBar('Reply cannot exceed 1000 characters', isError: true);
       return;
     }
 
@@ -1312,6 +1327,34 @@ class _DiscussionDetailScreenState
         setState(() => _editingReplyId = null);
         _showSnackBar('Reply updated', isError: false);
       } else {
+        // ─── Simple per-user, per-thread rate-limit: 1 reply / 5 seconds ───
+        try {
+          final now = DateTime.now();
+          final cutoff = Timestamp.fromDate(
+            now.subtract(const Duration(seconds: 5)),
+          );
+
+          final recent = await FirebaseFirestore.instance
+              .collection('discussions')
+              .doc(widget.discussionId)
+              .collection('replies')
+              .where('authorId', isEqualTo: widget.currentUid)
+              .where('createdAt', isGreaterThan: cutoff)
+              .limit(1)
+              .get();
+
+          if (recent.docs.isNotEmpty) {
+            _showSnackBar(
+              'You are replying too quickly. Please wait a few seconds.',
+              isError: true,
+            );
+            return;
+          }
+        } catch (e) {
+          // If rate-limit check fails, continue without blocking.
+          debugPrint('Reply rate-limit check error: $e');
+        }
+
         // ─── New reply ───
         final batch = FirebaseFirestore.instance.batch();
         final replyRef = FirebaseFirestore.instance
@@ -1398,26 +1441,31 @@ class _DiscussionDetailScreenState
     _showSnackBar('Reply deleted', isError: false);
   }
 
-  Future<void> _toggleReplyLike(
-      String replyId, int count) async {
+  Future<void> _toggleReplyLike(String replyId, int count) async {
+    if (widget.currentUid.isEmpty) {
+      _showSnackBar('Sign in to like replies', isError: true);
+      return;
+    }
+
     final ref = FirebaseFirestore.instance
         .collection('discussions')
         .doc(widget.discussionId)
         .collection('replies')
         .doc(replyId);
-    final likeRef = ref
-        .collection('likes')
-        .doc(widget.currentUid);
-    final liked = await likeRef.get();
-    if (liked.exists) {
+
+    final likeRef =
+        ref.collection('likes').doc(widget.currentUid);
+    final likedSnap = await likeRef.get();
+
+    if (likedSnap.exists) {
       await likeRef.delete();
-      await ref.update(
-          {'likesCount': FieldValue.increment(-1)});
+      await ref.update({'likesCount': FieldValue.increment(-1)});
     } else {
-      await likeRef
-          .set({'likedAt': FieldValue.serverTimestamp()});
-      await ref.update(
-          {'likesCount': FieldValue.increment(1)});
+      await likeRef.set({
+        'uid': widget.currentUid,
+        'likedAt': FieldValue.serverTimestamp(),
+      });
+      await ref.update({'likesCount': FieldValue.increment(1)});
     }
   }
 
@@ -1628,12 +1676,14 @@ class _DiscussionDetailScreenState
                             backgroundColor: AppColors
                                 .brandRed
                                 .withOpacity(0.1),
-                            backgroundImage:
-                                authorAvatar != null
-                                    ? NetworkImage(
-                                        authorAvatar)
-                                    : null,
-                            child: authorAvatar == null
+                            backgroundImage: (authorAvatar != null &&
+                                    authorAvatar.trim().isNotEmpty &&
+                                    !authorAvatar.trim().toLowerCase().startsWith('file://'))
+                                ? NetworkImage(authorAvatar)
+                                : null,
+                            child: (authorAvatar == null ||
+                                    authorAvatar.trim().isEmpty ||
+                                    authorAvatar.trim().toLowerCase().startsWith('file://'))
                                 ? Text(
                                     authorName.isNotEmpty
                                         ? authorName[0]
@@ -1681,45 +1731,48 @@ class _DiscussionDetailScreenState
 
                           // ─── Like post ───
                           StreamBuilder<DocumentSnapshot>(
-                            stream: FirebaseFirestore
-                                .instance
-                                .collection('discussions')
-                                .doc(widget.discussionId)
-                                .collection('likes')
-                                .doc(widget.currentUid)
-                                .snapshots(),
+                            stream: widget.currentUid.isNotEmpty
+                                ? FirebaseFirestore.instance
+                                    .collection('discussions')
+                                    .doc(widget.discussionId)
+                                    .collection('likes')
+                                    .doc(widget.currentUid)
+                                    .snapshots()
+                                : const Stream.empty(),
                             builder: (context, snap) {
-                              final liked =
-                                  snap.data?.exists ??
-                                      false;
+                              final liked = snap.data?.exists ?? false;
                               return GestureDetector(
                                 onTap: () async {
-                                  final ref = FirebaseFirestore
-                                      .instance
-                                      .collection(
-                                          'discussions')
-                                      .doc(widget
-                                          .discussionId);
+                                  if (widget.currentUid.isEmpty) {
+                                    _showSnackBar(
+                                      'Sign in to like discussions',
+                                      isError: true,
+                                    );
+                                    return;
+                                  }
+
+                                  final ref = FirebaseFirestore.instance
+                                      .collection('discussions')
+                                      .doc(widget.discussionId);
                                   final likeRef = ref
                                       .collection('likes')
-                                      .doc(widget
-                                          .currentUid);
+                                      .doc(widget.currentUid);
+
                                   if (liked) {
                                     await likeRef.delete();
                                     await ref.update({
                                       'likesCount':
-                                          FieldValue
-                                              .increment(-1)
+                                          FieldValue.increment(-1),
                                     });
                                   } else {
                                     await likeRef.set({
-                                      'likedAt': FieldValue
-                                          .serverTimestamp()
+                                      'uid': widget.currentUid,
+                                      'likedAt':
+                                          FieldValue.serverTimestamp(),
                                     });
                                     await ref.update({
                                       'likesCount':
-                                          FieldValue
-                                              .increment(1)
+                                          FieldValue.increment(1),
                                     });
                                   }
                                 },
@@ -1869,7 +1922,9 @@ class _DiscussionDetailScreenState
                           final d = doc.data()
                               as Map<String, dynamic>;
                           return _replyCard(
-                              doc.id, d);
+                              doc.id, d, (replyId, authorName) {
+                            // Handle reply-to action if needed
+                          });
                         },
                         childCount: docs.length,
                       ),
@@ -1933,12 +1988,20 @@ class _DiscussionDetailScreenState
                       radius: 16,
                       backgroundColor: AppColors.brandRed
                           .withOpacity(0.1),
-                      backgroundImage:
-                          widget.currentAvatar != null
-                              ? NetworkImage(
-                                  widget.currentAvatar!)
-                              : null,
-                      child: widget.currentAvatar == null
+                      backgroundImage: (widget.currentAvatar != null &&
+                              widget.currentAvatar!.trim().isNotEmpty &&
+                              !widget.currentAvatar!
+                                  .trim()
+                                  .toLowerCase()
+                                  .startsWith('file://'))
+                          ? NetworkImage(widget.currentAvatar!)
+                          : null,
+                      child: (widget.currentAvatar == null ||
+                              widget.currentAvatar!.trim().isEmpty ||
+                              widget.currentAvatar!
+                                  .trim()
+                                  .toLowerCase()
+                                  .startsWith('file://'))
                           ? Text(
                               widget.currentName.isNotEmpty
                                   ? widget
@@ -1986,7 +2049,7 @@ class _DiscussionDetailScreenState
                       child: Container(
                         width: 40,
                         height: 40,
-                        decoration: BoxDecoration(
+                        decoration: const BoxDecoration(
                           color: AppColors.brandRed,
                           shape: BoxShape.circle,
                         ),
@@ -2035,7 +2098,10 @@ class _DiscussionDetailScreenState
   }
 
   Widget _replyCard(
-      String replyId, Map<String, dynamic> d) {
+      String replyId,
+      Map<String, dynamic> d,
+      void Function(String replyId, String authorName) onReplyTo,
+  ) {
     final body = d['body']?.toString() ?? '';
     final authorName =
         d['authorName']?.toString() ?? 'Alumni';
@@ -2064,10 +2130,20 @@ class _DiscussionDetailScreenState
               radius: 14,
               backgroundColor:
                   AppColors.brandRed.withOpacity(0.1),
-              backgroundImage: authorAvatar != null
+              backgroundImage: (authorAvatar != null &&
+                      authorAvatar.trim().isNotEmpty &&
+                      !authorAvatar
+                          .trim()
+                          .toLowerCase()
+                          .startsWith('file://'))
                   ? NetworkImage(authorAvatar)
                   : null,
-              child: authorAvatar == null
+              child: (authorAvatar == null ||
+                      authorAvatar.trim().isEmpty ||
+                      authorAvatar
+                          .trim()
+                          .toLowerCase()
+                          .startsWith('file://'))
                   ? Text(
                       authorName.isNotEmpty
                           ? authorName[0].toUpperCase()
@@ -2110,14 +2186,16 @@ class _DiscussionDetailScreenState
 
             // ─── Like reply ───
             StreamBuilder<DocumentSnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('discussions')
-                  .doc(widget.discussionId)
-                  .collection('replies')
-                  .doc(replyId)
-                  .collection('likes')
-                  .doc(widget.currentUid)
-                  .snapshots(),
+              stream: widget.currentUid.isNotEmpty
+                  ? FirebaseFirestore.instance
+                      .collection('discussions')
+                      .doc(widget.discussionId)
+                      .collection('replies')
+                      .doc(replyId)
+                      .collection('likes')
+                      .doc(widget.currentUid)
+                      .snapshots()
+                  : const Stream.empty(),
               builder: (context, snap) {
                 final liked = snap.data?.exists ?? false;
                 return GestureDetector(
@@ -2143,9 +2221,25 @@ class _DiscussionDetailScreenState
               },
             ),
 
+            // ─── Reply action ───
+            TextButton(
+              onPressed: () => onReplyTo(replyId, authorName),
+              style: TextButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                'Reply',
+                style: GoogleFonts.inter(
+                    fontSize: 11, color: AppColors.brandRed),
+              ),
+            ),
+
             // ─── Actions ───
             if (isOwner || _isStaff) ...[
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_horiz,
                     size: 16, color: AppColors.mutedText),

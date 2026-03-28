@@ -6,8 +6,7 @@ class GalleryScreen extends StatefulWidget {
   const GalleryScreen({super.key});
 
   @override
-  State<GalleryScreen> createState() =>
-      _GalleryScreenState();
+  State<GalleryScreen> createState() => _GalleryScreenState();
 }
 
 class _GalleryScreenState extends State<GalleryScreen> {
@@ -74,9 +73,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
 
   List<Map<String, String>> get _filtered {
     if (_activeCategory == 'All') {
-      return _galleryItems
-          .map((e) => e.cast<String, String>())
-          .toList();
+      return _galleryItems.map((e) => e.cast<String, String>()).toList();
     }
     return _galleryItems
         .where((e) => e['category'] == _activeCategory)
@@ -105,14 +102,14 @@ class _GalleryScreenState extends State<GalleryScreen> {
                 onTap: () => Navigator.pop(context),
                 child: Container(
                   decoration: BoxDecoration(
-                    color:
-                        Colors.white.withOpacity(0.08),
+                    color: Colors.white.withOpacity(0.08),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
-                      Icons.arrow_back_ios_new_rounded,
-                      color: Colors.white,
-                      size: 16),
+                    Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white,
+                    size: 16,
+                  ),
                 ),
               ),
             ),
@@ -121,18 +118,13 @@ class _GalleryScreenState extends State<GalleryScreen> {
               background: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // ─── Background image ───
                   Image.asset(
                     'assets/images/gallery/building.jpg',
                     fit: BoxFit.cover,
-                    opacity:
-                        const AlwaysStoppedAnimation(0.4),
+                    opacity: const AlwaysStoppedAnimation(0.4),
                     errorBuilder: (_, __, ___) =>
-                        Container(
-                            color: const Color(0xFF1A1A1A)),
+                        Container(color: const Color(0xFF1A1A1A)),
                   ),
-
-                  // ─── Gradient overlay ───
                   Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -140,31 +132,27 @@ class _GalleryScreenState extends State<GalleryScreen> {
                         end: Alignment.bottomCenter,
                         colors: [
                           Colors.transparent,
-                          const Color(0xFF0C0C0C)
-                              .withOpacity(0.6),
+                          const Color(0xFF0C0C0C).withOpacity(0.6),
                           const Color(0xFF0C0C0C),
                         ],
                         stops: const [0.3, 0.7, 1.0],
                       ),
                     ),
                   ),
-
-                  // ─── Hero content ───
                   Positioned(
                     bottom: 0,
                     left: 0,
                     right: 0,
                     child: Padding(
                       padding: EdgeInsets.fromLTRB(
-                          isMobile ? 24 : 48,
-                          0,
-                          isMobile ? 24 : 48,
-                          32),
+                        isMobile ? 24 : 48,
+                        0,
+                        isMobile ? 24 : 48,
+                        32,
+                      ),
                       child: Column(
-                        crossAxisAlignment:
-                            CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ─── Tag ───
                           Row(children: [
                             Container(
                                 width: 20,
@@ -174,21 +162,18 @@ class _GalleryScreenState extends State<GalleryScreen> {
                             Text(
                               'ST. CECILIA\'S  ·  ARCHIVE',
                               style: GoogleFonts.inter(
-                                  fontSize: 9,
-                                  letterSpacing: 3,
-                                  color:
-                                      AppColors.brandRed,
-                                  fontWeight:
-                                      FontWeight.w700),
+                                fontSize: 9,
+                                letterSpacing: 3,
+                                color: AppColors.brandRed,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ]),
                           const SizedBox(height: 12),
                           Text(
                             'The Archive.',
-                            style:
-                                GoogleFonts.cormorantGaramond(
-                              fontSize:
-                                  isMobile ? 42 : 60,
+                            style: GoogleFonts.cormorantGaramond(
+                              fontSize: isMobile ? 42 : 60,
                               fontWeight: FontWeight.w300,
                               color: Colors.white,
                               height: 1.0,
@@ -199,10 +184,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
                             'A quiet collection of light, memory, and legacy.',
                             style: GoogleFonts.inter(
                               fontSize: 13,
-                              color: Colors.white
-                                  .withOpacity(0.5),
-                              fontWeight:
-                                  FontWeight.w300,
+                              color: Colors.white.withOpacity(0.5),
+                              fontWeight: FontWeight.w300,
                               letterSpacing: 0.3,
                             ),
                           ),
@@ -220,39 +203,36 @@ class _GalleryScreenState extends State<GalleryScreen> {
             child: Container(
               color: const Color(0xFF0C0C0C),
               padding: EdgeInsets.fromLTRB(
-                  isMobile ? 24 : 48, 8, isMobile ? 24 : 48, 24),
+                isMobile ? 24 : 48,
+                8,
+                isMobile ? 24 : 48,
+                24,
+              ),
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: _categories.map((cat) {
-                    final isActive =
-                        _activeCategory == cat;
+                    final isActive = _activeCategory == cat;
                     return GestureDetector(
-                      onTap: () => setState(
-                          () => _activeCategory = cat),
+                      onTap: () => setState(() => _activeCategory = cat),
                       child: MouseRegion(
                         cursor: SystemMouseCursors.click,
                         child: AnimatedContainer(
-                          duration: const Duration(
-                              milliseconds: 200),
-                          margin: const EdgeInsets.only(
-                              right: 8),
-                          padding:
-                              const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 8),
+                          duration: const Duration(milliseconds: 200),
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
                             color: isActive
                                 ? AppColors.brandRed
-                                : Colors.white
-                                    .withOpacity(0.06),
-                            borderRadius:
-                                BorderRadius.circular(4),
+                                : Colors.white.withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(4),
                             border: Border.all(
                               color: isActive
                                   ? AppColors.brandRed
-                                  : Colors.white
-                                      .withOpacity(0.1),
+                                  : Colors.white.withOpacity(0.1),
                               width: 0.5,
                             ),
                           ),
@@ -264,8 +244,7 @@ class _GalleryScreenState extends State<GalleryScreen> {
                               fontWeight: FontWeight.w700,
                               color: isActive
                                   ? Colors.white
-                                  : Colors.white
-                                      .withOpacity(0.5),
+                                  : Colors.white.withOpacity(0.5),
                             ),
                           ),
                         ),
@@ -282,24 +261,18 @@ class _GalleryScreenState extends State<GalleryScreen> {
             child: Container(
               color: const Color(0xFF111111),
               padding: EdgeInsets.symmetric(
-                  horizontal: isMobile ? 24 : 48,
-                  vertical: 16),
+                horizontal: isMobile ? 24 : 48,
+                vertical: 16,
+              ),
               child: Row(children: [
-                _stripStat('${_filtered.length}',
-                    'PHOTOS'),
+                _stripStat('${_filtered.length}', 'PHOTOS'),
                 _stripDivider(),
                 _stripStat(
-                    _filtered
-                        .map((e) => e['year'])
-                        .toSet()
-                        .length
-                        .toString(),
-                    'YEARS'),
+                  _filtered.map((e) => e['year']).toSet().length.toString(),
+                  'YEARS',
+                ),
                 _stripDivider(),
-                _stripStat(
-                    _categories.length
-                        .toString(),
-                    'CATEGORIES'),
+                _stripStat(_categories.length.toString(), 'CATEGORIES'),
               ]),
             ),
           ),
@@ -310,21 +283,21 @@ class _GalleryScreenState extends State<GalleryScreen> {
                   child: Container(
                     color: const Color(0xFF0C0C0C),
                     padding:
-                        const EdgeInsets.symmetric(
-                            vertical: 100),
+                        const EdgeInsets.symmetric(vertical: 100),
                     child: Center(
                       child: Column(children: [
                         const Icon(
-                            Icons
-                                .photo_library_outlined,
-                            size: 48,
-                            color: Colors.white12),
+                          Icons.photo_library_outlined,
+                          size: 48,
+                          color: Colors.white12,
+                        ),
                         const SizedBox(height: 16),
                         Text(
                           'No photos in this category',
                           style: GoogleFonts.inter(
-                              color: Colors.white24,
-                              fontSize: 14),
+                            color: Colors.white24,
+                            fontSize: 14,
+                          ),
                         ),
                       ]),
                     ),
@@ -332,22 +305,21 @@ class _GalleryScreenState extends State<GalleryScreen> {
                 )
               : SliverPadding(
                   padding: EdgeInsets.fromLTRB(
-                      isMobile ? 16 : 48,
-                      24,
-                      isMobile ? 16 : 48,
-                      0),
+                    isMobile ? 16 : 48,
+                    24,
+                    isMobile ? 16 : 48,
+                    0,
+                  ),
                   sliver: SliverGrid(
                     gridDelegate:
                         SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: isMobile ? 1 : 2,
                       crossAxisSpacing: 2,
                       mainAxisSpacing: 2,
-                      childAspectRatio:
-                          isMobile ? 1.2 : 1.1,
+                      childAspectRatio: isMobile ? 1.2 : 1.1,
                     ),
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
-                        // ─── First item is large (spans 2 cols conceptually) ───
                         if (!isMobile && index == 0) {
                           return _GalleryCard(
                             item: _filtered[index],
@@ -364,9 +336,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
                 ),
 
           // ─── Bottom padding ───
-          SliverToBoxAdapter(
-            child: Container(
-              color: const Color(0xFF0C0C0C),
+          const SliverToBoxAdapter(
+            child: SizedBox(
               height: 80,
             ),
           ),
@@ -377,18 +348,24 @@ class _GalleryScreenState extends State<GalleryScreen> {
 
   Widget _stripStat(String value, String label) {
     return Row(children: [
-      Text(value,
-          style: GoogleFonts.cormorantGaramond(
-              fontSize: 24,
-              fontWeight: FontWeight.w300,
-              color: Colors.white)),
+      Text(
+        value,
+        style: GoogleFonts.cormorantGaramond(
+          fontSize: 24,
+          fontWeight: FontWeight.w300,
+          color: Colors.white,
+        ),
+      ),
       const SizedBox(width: 8),
-      Text(label,
-          style: GoogleFonts.inter(
-              fontSize: 9,
-              letterSpacing: 2,
-              color: Colors.white.withOpacity(0.3),
-              fontWeight: FontWeight.w600)),
+      Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 9,
+          letterSpacing: 2,
+          color: Colors.white.withOpacity(0.3),
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     ]);
   }
 
@@ -412,8 +389,7 @@ class _GalleryCard extends StatefulWidget {
   });
 
   @override
-  State<_GalleryCard> createState() =>
-      _GalleryCardState();
+  State<_GalleryCard> createState() => _GalleryCardState();
 }
 
 class _GalleryCardState extends State<_GalleryCard> {
@@ -440,7 +416,7 @@ class _GalleryCardState extends State<_GalleryCard> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // ─── Image ───
+              // Image
               AnimatedScale(
                 scale: _hovered ? 1.03 : 1.0,
                 duration: const Duration(milliseconds: 400),
@@ -451,19 +427,19 @@ class _GalleryCardState extends State<_GalleryCard> {
                     color: const Color(0xFF1A1A1A),
                     child: const Center(
                       child: Icon(
-                          Icons.hide_image_outlined,
-                          color: Colors.white12,
-                          size: 40),
+                        Icons.hide_image_outlined,
+                        color: Colors.white12,
+                        size: 40,
+                      ),
                     ),
                   ),
                 ),
               ),
 
-              // ─── Gradient ───
+              // Gradient
               Positioned.fill(
                 child: AnimatedOpacity(
-                  duration:
-                      const Duration(milliseconds: 300),
+                  duration: const Duration(milliseconds: 300),
                   opacity: _hovered ? 0.85 : 0.5,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
@@ -482,27 +458,27 @@ class _GalleryCardState extends State<_GalleryCard> {
                 ),
               ),
 
-              // ─── Category badge ───
+              // Category badge
               Positioned(
                 top: 16,
                 left: 16,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: _hovered
                         ? AppColors.brandRed
                         : Colors.black.withOpacity(0.5),
-                    borderRadius:
-                        BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(2),
                     border: Border.all(
-                        color: Colors.white
-                            .withOpacity(0.1),
-                        width: 0.5),
+                      color: Colors.white.withOpacity(0.1),
+                      width: 0.5,
+                    ),
                   ),
                   child: Text(
-                    widget.item['category']!
-                        .toUpperCase(),
+                    widget.item['category']!.toUpperCase(),
                     style: GoogleFonts.inter(
                       fontSize: 8,
                       letterSpacing: 1.5,
@@ -513,47 +489,44 @@ class _GalleryCardState extends State<_GalleryCard> {
                 ),
               ),
 
-              // ─── Year badge ───
+              // Year badge
               Positioned(
                 top: 16,
                 right: 16,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
-                    color:
-                        Colors.black.withOpacity(0.5),
-                    borderRadius:
-                        BorderRadius.circular(2),
+                    color: Colors.black.withOpacity(0.5),
+                    borderRadius: BorderRadius.circular(2),
                     border: Border.all(
-                        color: Colors.white
-                            .withOpacity(0.1),
-                        width: 0.5),
+                      color: Colors.white.withOpacity(0.1),
+                      width: 0.5,
+                    ),
                   ),
                   child: Text(
                     widget.item['year']!,
                     style: GoogleFonts.inter(
                       fontSize: 8,
                       letterSpacing: 1,
-                      color: Colors.white
-                          .withOpacity(0.7),
+                      color: Colors.white.withOpacity(0.7),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
               ),
 
-              // ─── Bottom content ───
+              // Bottom content
               Positioned(
                 bottom: 0,
                 left: 0,
                 right: 0,
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                      20, 0, 20, 20),
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(children: [
                         Container(
@@ -562,26 +535,21 @@ class _GalleryCardState extends State<_GalleryCard> {
                             color: AppColors.brandRed),
                         const SizedBox(width: 8),
                         Text(
-                          widget.item['category']!
-                              .toUpperCase(),
+                          widget.item['category']!.toUpperCase(),
                           style: GoogleFonts.inter(
                             fontSize: 8,
                             letterSpacing: 2,
                             color: AppColors.brandRed,
-                            fontWeight:
-                                FontWeight.w700,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ]),
                       const SizedBox(height: 6),
                       Text(
                         widget.item['title']!,
-                        style:
-                            GoogleFonts.cormorantGaramond(
+                        style: GoogleFonts.cormorantGaramond(
                           color: Colors.white,
-                          fontSize: widget.isFeature
-                              ? 28
-                              : 22,
+                          fontSize: widget.isFeature ? 28 : 22,
                           fontWeight: FontWeight.w400,
                           height: 1.1,
                         ),
@@ -589,59 +557,41 @@ class _GalleryCardState extends State<_GalleryCard> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       AnimatedSize(
-                        duration: const Duration(
-                            milliseconds: 250),
+                        duration: const Duration(milliseconds: 250),
                         child: _hovered
                             ? Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment
-                                        .start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const SizedBox(
-                                      height: 6),
+                                  const SizedBox(height: 6),
                                   Text(
-                                    widget.item[
-                                        'description']!,
+                                    widget.item['description']!,
                                     style: GoogleFonts.inter(
-                                      color: Colors
-                                          .white
-                                          .withOpacity(
-                                              0.7),
+                                      color:
+                                          Colors.white.withOpacity(0.7),
                                       fontSize: 11,
                                       height: 1.5,
-                                      fontWeight:
-                                          FontWeight.w300,
+                                      fontWeight: FontWeight.w300,
                                     ),
                                     maxLines: 2,
-                                    overflow:
-                                        TextOverflow
-                                            .ellipsis,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  const SizedBox(
-                                      height: 10),
+                                  const SizedBox(height: 10),
                                   Row(children: [
                                     Text(
                                       'VIEW',
-                                      style:
-                                          GoogleFonts.inter(
+                                      style: GoogleFonts.inter(
                                         fontSize: 9,
                                         letterSpacing: 2,
-                                        color: Colors
-                                            .white
-                                            .withOpacity(
-                                                0.6),
-                                        fontWeight:
-                                            FontWeight.w700,
+                                        color: Colors.white.withOpacity(0.6),
+                                        fontWeight: FontWeight.w700,
                                       ),
                                     ),
-                                    const SizedBox(
-                                        width: 6),
+                                    const SizedBox(width: 6),
                                     const Icon(
-                                        Icons
-                                            .arrow_forward,
-                                        size: 10,
-                                        color: Colors
-                                            .white60),
+                                      Icons.arrow_forward,
+                                      size: 10,
+                                      color: Colors.white60,
+                                    ),
                                   ]),
                                 ],
                               )
@@ -662,14 +612,11 @@ class _GalleryCardState extends State<_GalleryCard> {
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (_, __, ___) =>
-            _FullScreenView(item: widget.item),
+        pageBuilder: (_, __, ___) => _FullScreenView(item: widget.item),
         transitionsBuilder: (_, animation, __, child) {
-          return FadeTransition(
-              opacity: animation, child: child);
+          return FadeTransition(opacity: animation, child: child);
         },
-        transitionDuration:
-            const Duration(milliseconds: 400),
+        transitionDuration: const Duration(milliseconds: 400),
       ),
     );
   }
@@ -681,12 +628,10 @@ class _FullScreenView extends StatefulWidget {
   const _FullScreenView({required this.item});
 
   @override
-  State<_FullScreenView> createState() =>
-      _FullScreenViewState();
+  State<_FullScreenView> createState() => _FullScreenViewState();
 }
 
-class _FullScreenViewState
-    extends State<_FullScreenView> {
+class _FullScreenViewState extends State<_FullScreenView> {
   bool _showInfo = true;
 
   @override
@@ -694,14 +639,12 @@ class _FullScreenViewState
     return Scaffold(
       backgroundColor: Colors.black,
       body: GestureDetector(
-        onTap: () =>
-            setState(() => _showInfo = !_showInfo),
+        onTap: () => setState(() => _showInfo = !_showInfo),
         child: Stack(
           children: [
-            // ─── Zoomable image ───
+            // Zoomable image
             InteractiveViewer(
-              boundaryMargin:
-                  const EdgeInsets.all(80),
+              boundaryMargin: const EdgeInsets.all(80),
               minScale: 0.75,
               maxScale: 5.0,
               child: Center(
@@ -710,19 +653,18 @@ class _FullScreenViewState
                   fit: BoxFit.contain,
                   errorBuilder: (_, __, ___) =>
                       const Icon(
-                          Icons
-                              .hide_image_outlined,
-                          color: Colors.white12,
-                          size: 120),
+                        Icons.hide_image_outlined,
+                        color: Colors.white12,
+                        size: 120,
+                      ),
                 ),
               ),
             ),
 
-            // ─── Top bar ───
+            // Top bar
             AnimatedOpacity(
               opacity: _showInfo ? 1.0 : 0.0,
-              duration:
-                  const Duration(milliseconds: 250),
+              duration: const Duration(milliseconds: 250),
               child: Positioned(
                 top: 0,
                 left: 0,
@@ -743,59 +685,45 @@ class _FullScreenViewState
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 8),
                       child: Row(
-                        mainAxisAlignment:
-                            MainAxisAlignment
-                                .spaceBetween,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          // ─── Back button ───
                           GestureDetector(
-                            onTap: () =>
-                                Navigator.pop(context),
+                            onTap: () => Navigator.pop(context),
                             child: Container(
-                              padding:
-                                  const EdgeInsets.all(
-                                      10),
+                              padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: Colors.white
-                                    .withOpacity(0.1),
+                                color: Colors.white.withOpacity(0.1),
                                 shape: BoxShape.circle,
                               ),
                               child: const Icon(
-                                  Icons
-                                      .arrow_back_ios_new_rounded,
-                                  color: Colors.white,
-                                  size: 16),
+                                Icons.arrow_back_ios_new_rounded,
+                                color: Colors.white,
+                                size: 16,
+                              ),
                             ),
                           ),
-
-                          // ─── Category + year ───
                           Row(children: [
                             Container(
-                              padding:
-                                  const EdgeInsets
-                                      .symmetric(
-                                      horizontal: 10,
-                                      vertical: 5),
-                              color:
-                                  AppColors.brandRed,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              color: AppColors.brandRed,
                               child: Text(
-                                widget.item['category']!
-                                    .toUpperCase(),
+                                widget.item['category']!.toUpperCase(),
                                 style: GoogleFonts.inter(
-                                    fontSize: 9,
-                                    letterSpacing: 1.5,
-                                    color: Colors.white,
-                                    fontWeight:
-                                        FontWeight.w700),
+                                  fontSize: 9,
+                                  letterSpacing: 1.5,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 8),
                             Text(
                               widget.item['year']!,
                               style: GoogleFonts.inter(
-                                  fontSize: 11,
-                                  color: Colors.white
-                                      .withOpacity(0.6)),
+                                fontSize: 11,
+                                color: Colors.white.withOpacity(0.6),
+                              ),
                             ),
                           ]),
                         ],
@@ -806,17 +734,15 @@ class _FullScreenViewState
               ),
             ),
 
-            // ─── Bottom info ───
+            // Bottom info
             AnimatedPositioned(
-              duration:
-                  const Duration(milliseconds: 300),
+              duration: const Duration(milliseconds: 300),
               curve: Curves.easeOut,
               bottom: _showInfo ? 0 : -200,
               left: 0,
               right: 0,
               child: Container(
-                padding: const EdgeInsets.fromLTRB(
-                    32, 48, 32, 48),
+                padding: const EdgeInsets.fromLTRB(32, 48, 32, 48),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -829,8 +755,7 @@ class _FullScreenViewState
                   ),
                 ),
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Row(children: [
@@ -842,18 +767,17 @@ class _FullScreenViewState
                       Text(
                         'ST. CECILIA\'S ARCHIVE',
                         style: GoogleFonts.inter(
-                            fontSize: 9,
-                            letterSpacing: 3,
-                            color: AppColors.brandRed,
-                            fontWeight:
-                                FontWeight.w700),
+                          fontSize: 9,
+                          letterSpacing: 3,
+                          color: AppColors.brandRed,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ]),
                     const SizedBox(height: 12),
                     Text(
                       widget.item['title']!,
-                      style:
-                          GoogleFonts.cormorantGaramond(
+                      style: GoogleFonts.cormorantGaramond(
                         color: Colors.white,
                         fontSize: 36,
                         fontWeight: FontWeight.w300,
@@ -864,8 +788,7 @@ class _FullScreenViewState
                     Text(
                       widget.item['description']!,
                       style: GoogleFonts.inter(
-                        color: Colors.white
-                            .withOpacity(0.6),
+                        color: Colors.white.withOpacity(0.6),
                         fontSize: 14,
                         height: 1.6,
                         fontWeight: FontWeight.w300,
@@ -875,12 +798,11 @@ class _FullScreenViewState
                     Text(
                       'TAP ANYWHERE TO TOGGLE INFO',
                       style: GoogleFonts.inter(
-                          fontSize: 8,
-                          letterSpacing: 2,
-                          color: Colors.white
-                              .withOpacity(0.25),
-                          fontWeight:
-                              FontWeight.w600),
+                        fontSize: 8,
+                        letterSpacing: 2,
+                        color: Colors.white.withOpacity(0.25),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
