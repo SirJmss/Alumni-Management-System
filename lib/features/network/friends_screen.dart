@@ -235,7 +235,7 @@ class _ConnectionsTab extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 8),
           itemCount: docs.length,
           separatorBuilder: (_, __) =>
-              Divider(height: 1, color: AppColors.borderSubtle),
+              const Divider(height: 1, color: AppColors.borderSubtle),
           itemBuilder: (context, index) {
             final uid = docs[index].id;
             if (uid.isEmpty) return const SizedBox.shrink();
@@ -499,7 +499,7 @@ class _RequestsTabState extends State<_RequestsTab> {
           padding: const EdgeInsets.symmetric(vertical: 4),
           itemCount: snapshot.data!.docs.length,
           separatorBuilder: (_, __) =>
-              Divider(height: 1, color: AppColors.borderSubtle),
+              const Divider(height: 1, color: AppColors.borderSubtle),
           itemBuilder: (context, index) {
             final doc = snapshot.data!.docs[index];
             final data = doc.data() as Map<String, dynamic>? ?? {};
@@ -580,7 +580,7 @@ class _RequestsTabState extends State<_RequestsTab> {
           padding: const EdgeInsets.symmetric(vertical: 4),
           itemCount: snapshot.data!.docs.length,
           separatorBuilder: (_, __) =>
-              Divider(height: 1, color: AppColors.borderSubtle),
+              const Divider(height: 1, color: AppColors.borderSubtle),
           itemBuilder: (context, index) {
             final doc = snapshot.data!.docs[index];
             final data = doc.data() as Map<String, dynamic>? ?? {};
@@ -723,7 +723,7 @@ class _FollowingTab extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 8),
           itemCount: docs.length,
           separatorBuilder: (_, __) =>
-              Divider(height: 1, color: AppColors.borderSubtle),
+              const Divider(height: 1, color: AppColors.borderSubtle),
           itemBuilder: (context, index) {
             final uid = docs[index].id;
             if (uid.isEmpty) return const SizedBox.shrink();

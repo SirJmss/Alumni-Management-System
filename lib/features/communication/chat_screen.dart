@@ -503,7 +503,7 @@ class _ChatScreenState extends State<ChatScreen> {
         top: 10,
         bottom: MediaQuery.of(context).viewInsets.bottom + 10,
       ),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: AppColors.cardWhite,
         border: Border(top: BorderSide(color: AppColors.borderSubtle)),
       ),
@@ -693,13 +693,13 @@ class _DateSeparator extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
       child: Row(children: [
-        Expanded(child: Divider(color: AppColors.borderSubtle)),
+        const Expanded(child: Divider(color: AppColors.borderSubtle)),
         const SizedBox(width: 12),
         Text(label,
             style: GoogleFonts.inter(
                 fontSize: 12, color: AppColors.mutedText)),
         const SizedBox(width: 12),
-        Expanded(child: Divider(color: AppColors.borderSubtle)),
+        const Expanded(child: Divider(color: AppColors.borderSubtle)),
       ]),
     );
   }

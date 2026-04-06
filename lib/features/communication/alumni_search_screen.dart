@@ -354,7 +354,7 @@ class _AlumniSearchScreenState extends State<AlumniSearchScreen> {
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: _results.length,
       separatorBuilder: (_, __) =>
-          Divider(height: 1, color: AppColors.borderSubtle),
+          const Divider(height: 1, color: AppColors.borderSubtle),
       itemBuilder: (context, index) {
         final user = _results[index];
         final uid = user['uid']?.toString() ?? '';
