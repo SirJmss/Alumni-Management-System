@@ -540,7 +540,7 @@ class _AlumniPublicProfileScreenState
     );
 
     // Resolve URLs from multiple possible keys & ignore obvious invalid values
-    String _resolveUrl(List<String> keys) {
+    String resolveUrl(List<String> keys) {
       for (final k in keys) {
         final raw = data[k]?.toString().trim() ?? '';
         if (raw.isNotEmpty &&
@@ -553,9 +553,9 @@ class _AlumniPublicProfileScreenState
     }
 
     final avatarUrl =
-        _resolveUrl(['profilePictureUrl', 'photoURL', 'avatarUrl']);
+        resolveUrl(['profilePictureUrl', 'photoURL', 'avatarUrl']);
     final coverUrl =
-        _resolveUrl(['coverPhotoUrl', 'coverPictureUrl', 'cover']);
+        resolveUrl(['coverPhotoUrl', 'coverPictureUrl', 'cover']);
     final headline = _safe(data, 'headline', fallback: _safe(data, 'role'));
     final about = _safe(data, 'about'); // real field name (not 'bio')
     final location = _safe(data, 'location');
@@ -600,10 +600,10 @@ class _AlumniPublicProfileScreenState
     }
 
     // Layout constants (mirror own-profile screen)
-    const double _avatarRadius = 52.0;
-    const double _avatarBorder = 4.0;
-    const double _coverHeight = 210.0;
-    const double _avatarTotal = _avatarRadius + _avatarBorder;
+    const double avatarRadius = 52.0;
+    const double avatarBorder = 4.0;
+    const double coverHeight = 210.0;
+    const double avatarTotal = avatarRadius + avatarBorder;
 
     return Scaffold(
       backgroundColor: AppColors.softWhite,
@@ -611,7 +611,7 @@ class _AlumniPublicProfileScreenState
         slivers: [
           // ── Cover + App Bar ─────────────────────────────────────────────
           SliverAppBar(
-            expandedHeight: _coverHeight,
+            expandedHeight: coverHeight,
             pinned: true,
             stretch: true,
             backgroundColor: AppColors.cardWhite,
@@ -667,7 +667,7 @@ class _AlumniPublicProfileScreenState
                     children: [
                       // Avatar — slightly overlaps cover, consistent with own profile
                       Transform.translate(
-                        offset: Offset(0, -_avatarTotal * 0.6),
+                        offset: const Offset(0, -avatarTotal * 0.6),
                         child: Hero(
                           tag: 'alumni_avatar_${widget.uid}',
                           child: Container(
@@ -675,7 +675,7 @@ class _AlumniPublicProfileScreenState
                               shape: BoxShape.circle,
                               border: Border.all(
                                   color: AppColors.softWhite,
-                                  width: _avatarBorder),
+                                  width: avatarBorder),
                               boxShadow: [
                                 BoxShadow(
                                   color: Colors.black.withOpacity(0.22),
@@ -686,14 +686,14 @@ class _AlumniPublicProfileScreenState
                               color: AppColors.cardWhite,
                             ),
                             child: CircleAvatar(
-                              radius: _avatarRadius,
+                              radius: avatarRadius,
                               backgroundColor: AppColors.borderSubtle,
                               child: avatarUrl.isNotEmpty
                                   ? ClipOval(
                                       child: CachedNetworkImage(
                                         imageUrl: avatarUrl,
-                                        width: _avatarRadius * 2,
-                                        height: _avatarRadius * 2,
+                                        width: avatarRadius * 2,
+                                        height: avatarRadius * 2,
                                         fit: BoxFit.cover,
                                         placeholder: (_, __) =>
                                             Container(color: Colors.grey.shade100),
@@ -760,7 +760,7 @@ class _AlumniPublicProfileScreenState
                 ),
 
                 // Extra spacing to account for avatar overlap
-                SizedBox(height: _avatarTotal * 0.6),
+                const SizedBox(height: avatarTotal * 0.6),
 
                 // ── Name + Role + Verification Badge ──────────────────────
                 Padding(
@@ -1222,7 +1222,7 @@ class _CareerSection extends StatelessWidget {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _IconBox(icon: Icons.work_outline),
+                          const _IconBox(icon: Icons.work_outline),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Column(
@@ -1282,7 +1282,7 @@ class _ExperienceItem extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _IconBox(icon: Icons.work_outline_rounded),
+        const _IconBox(icon: Icons.work_outline_rounded),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -1311,7 +1311,7 @@ class _ExperienceItem extends StatelessWidget {
               if (location.isNotEmpty) ...[
                 const SizedBox(height: 2),
                 Row(children: [
-                  Icon(Icons.location_on_outlined,
+                  const Icon(Icons.location_on_outlined,
                       size: 12, color: AppColors.mutedText),
                   const SizedBox(width: 3),
                   Flexible(
@@ -1370,7 +1370,7 @@ class _EducationItem extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _IconBox(icon: Icons.school_outlined),
+        const _IconBox(icon: Icons.school_outlined),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -1615,7 +1615,7 @@ class _ActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final shape =
         RoundedRectangleBorder(borderRadius: BorderRadius.circular(8));
-    final padding = const EdgeInsets.symmetric(horizontal: 14, vertical: 9);
+    const padding = EdgeInsets.symmetric(horizontal: 14, vertical: 9);
 
     final Widget content = loading
         ? SizedBox(

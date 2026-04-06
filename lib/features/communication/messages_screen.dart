@@ -213,7 +213,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
           return ListView.separated(
             padding: const EdgeInsets.symmetric(vertical: 8),
             itemCount: chats.length,
-            separatorBuilder: (_, __) => Divider(
+            separatorBuilder: (_, __) => const Divider(
               height: 1,
               indent: 80,
               color: AppColors.borderSubtle,
