@@ -407,7 +407,9 @@ class _EventListScreenState extends State<EventListScreen> {
                                     return GestureDetector(
                                       onTap: () async {
                                         if (currentUserUid ==
-                                            null) return;
+                                            null) {
+                                          return;
+                                        }
                                         final ref =
                                             FirebaseFirestore
                                                 .instance

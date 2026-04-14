@@ -629,7 +629,7 @@ class _EditEventScreenState extends State<EditEventScreen> {
             style: GoogleFonts.inter(
                 fontSize: 12, color: AppColors.mutedText)),
         value: value,
-        activeColor: AppColors.brandRed,
+        activeThumbColor: AppColors.brandRed,
         onChanged: onChanged,
       ),
     );

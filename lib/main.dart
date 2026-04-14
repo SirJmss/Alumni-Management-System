@@ -14,7 +14,6 @@ import 'package:alumni/features/dashboard/presentation/screens/admin_dashboard_w
 import 'package:alumni/features/admin/presentation/screens/user_verification_moderation_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/event_planning_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/job_board_management_screen.dart';
-import 'package:alumni/features/admin/presentation/screens/reunion_planning_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/career_milestones_screen.dart';
 import 'package:alumni/features/admin/presentation/screens/announcement_management_screen.dart';
 import 'package:alumni/features/event/presentation/screens/discussions_screen.dart';
@@ -70,8 +69,6 @@ class MyApp extends StatelessWidget {
             const EventPlanningScreen(),
         '/job_board_management': (context) =>
             const JobBoardManagementScreen(),
-        '/reunions_events': (context) =>
-            const ReunionAndEventsScreen(),
         '/career_milestones': (context) =>
             const CareerMilestonesScreen(),
         '/announcement_management': (context) =>

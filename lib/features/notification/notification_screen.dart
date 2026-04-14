@@ -139,7 +139,7 @@ class NotificationsScreen extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 8),
             itemCount: notifications.length,
             separatorBuilder: (_, __) =>
-                Divider(height: 1, color: AppColors.borderSubtle),
+                const Divider(height: 1, color: AppColors.borderSubtle),
             itemBuilder: (context, index) {
               final doc = notifications[index];
               final data = doc.data() as Map<String, dynamic>;

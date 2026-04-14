@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-
+import 'package:alumni/features/profile/presentation/screens/alumni_public_profile_screen.dart';
 import 'package:alumni/core/constants/app_colors.dart';
 import 'package:alumni/features/notification/notification_screen.dart';
 import 'package:alumni/features/notification/notification_service.dart';
@@ -66,7 +66,7 @@ class _DashboardScreenState
         _loadDashboardAggregates(),
         _loadRecentOpportunities(),
         _loadUpcomingCalendar(),
-        _loadNearbyAlumni(),
+        _loadBatchAndCourseMates(),
         _loadRecentAnnouncements(),
       ]);
     } finally {
@@ -248,45 +248,118 @@ class _DashboardScreenState
     }
   }
 
-  Future<void> _loadNearbyAlumni() async {
-    try {
-      final currentUid =
-          FirebaseAuth.instance.currentUser?.uid ?? '';
-      final snap = await FirebaseFirestore.instance
-          .collection('users')
-          .where('role', isEqualTo: 'alumni')
-          .where('status', isEqualTo: 'active')
-          .limit(20)
-          .get();
-      if (!mounted) return;
-      final filtered = snap.docs
-          .where((d) => d.id != currentUid)
-          .take(8)
-          .map((d) {
-        final data = d.data();
-        String get(String key) =>
-            data[key]?.toString().trim() ?? '';
-        return {
-          'uid': d.id,
-          'name': get('name').isNotEmpty
-              ? get('name')
-              : 'Alumni',
-          'headline': get('headline').isNotEmpty
-              ? get('headline')
-              : (get('course').isNotEmpty
-                  ? get('course')
-                  : 'Alumni'),
-          'batch': get('batch'),
-          'course': get('course'),
-          'avatarUrl': get('profilePictureUrl'),
-          'location': get('location'),
-        };
-      }).toList();
-      setState(() => nearbyAlumni = filtered);
-    } catch (e) {
-      debugPrint('Nearby alumni error: $e');
+// Replace your existing _loadNearbyAlumni() with this
+Future<void> _loadBatchAndCourseMates() async {
+  try {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (currentUid.isEmpty) return;
+
+    // Get current user's batch and course
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(currentUid)
+        .get();
+
+    if (!userDoc.exists) return;
+
+    final userData = userDoc.data() ?? {};
+    final myBatch = userData['batch']?.toString().trim() ?? '';
+    final myCourse = userData['course']?.toString().trim().toLowerCase() ?? '';
+
+    if (myBatch.isEmpty && myCourse.isEmpty) {
+      // Fallback to random if user has no batch/course
+      await _loadRandomAlumni(currentUid);
+      return;
     }
+
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .where('role', isEqualTo: 'alumni')
+        .where('status', isEqualTo: 'active')
+        .where('verificationStatus', isEqualTo: 'verified')
+        .limit(30) // fetch more to filter properly
+        .get();
+
+    if (!mounted) return;
+
+    final List<Map<String, dynamic>> mates = [];
+
+    for (var doc in snap.docs) {
+      if (doc.id == currentUid) continue;
+
+      final data = doc.data();
+      final batch = data['batch']?.toString().trim() ?? '';
+      final course = data['course']?.toString().trim().toLowerCase() ?? '';
+      final name = data['name']?.toString().trim() ?? 'Alumni';
+      final avatarUrl = data['profilePictureUrl']?.toString() ?? '';
+      final headline = data['headline']?.toString() ?? data['course']?.toString() ?? '';
+
+      int score = 0;
+      if (batch.isNotEmpty && batch == myBatch) score += 50;
+      if (course.isNotEmpty && course == myCourse) score += 40;
+
+      if (score > 0) {
+        mates.add({
+          'uid': doc.id,
+          'name': name,
+          'headline': headline,
+          'batch': batch,
+          'course': course,
+          'avatarUrl': avatarUrl,
+          'location': data['location']?.toString() ?? '',
+          'score': score,
+        });
+      }
+    }
+
+    // Sort by score (best matches first)
+    mates.sort((a, b) => (b['score'] as int).compareTo(a['score'] as int));
+
+    // Take top 8
+    setState(() {
+      nearbyAlumni = mates.take(8).toList();
+    });
+  } catch (e) {
+    debugPrint('Batch & Course mates error: $e');
+    // Fallback to random
+    await _loadRandomAlumni(FirebaseAuth.instance.currentUser?.uid ?? '');
   }
+}
+
+// Fallback: random verified alumni
+Future<void> _loadRandomAlumni(String currentUid) async {
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .where('role', isEqualTo: 'alumni')
+        .where('status', isEqualTo: 'active')
+        .where('verificationStatus', isEqualTo: 'verified')
+        .limit(20)
+        .get();
+
+    if (!mounted) return;
+
+    final filtered = snap.docs
+        .where((d) => d.id != currentUid)
+        .take(8)
+        .map((d) {
+      final data = d.data();
+      return {
+        'uid': d.id,
+        'name': data['name']?.toString() ?? 'Alumni',
+        'headline': data['headline']?.toString() ?? data['course']?.toString() ?? 'Alumni',
+        'batch': data['batch']?.toString() ?? '',
+        'course': data['course']?.toString() ?? '',
+        'avatarUrl': data['profilePictureUrl']?.toString() ?? '',
+        'location': data['location']?.toString() ?? '',
+      };
+    }).toList();
+
+    setState(() => nearbyAlumni = filtered);
+  } catch (e) {
+    debugPrint('Random alumni error: $e');
+  }
+}
 
   Future<void> _loadRecentAnnouncements() async {
     try {
@@ -1377,16 +1450,22 @@ class _DashboardScreenState
     );
   }
 
-  Widget _alumniNetworkCard(
-      Map<String, dynamic> alumni,
-      String currentUid) {
-    final toUid = alumni['uid'].toString();
-    final name = alumni['name'].toString();
-    final avatarUrl = alumni['avatarUrl'].toString();
-    final headline = alumni['headline'].toString();
-    final batch = alumni['batch'].toString();
+ Widget _alumniNetworkCard(
+    Map<String, dynamic> alumni, String currentUid) {
+  final toUid = alumni['uid'].toString();
+  final name = alumni['name'].toString();
+  final avatarUrl = alumni['avatarUrl'].toString();
+  final headline = alumni['headline'].toString();
+  final batch = alumni['batch'].toString();
 
-    return Container(
+  return GestureDetector(
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AlumniPublicProfileScreen(uid: toUid),
+      ),
+    ),
+    child: Container(
       width: 150,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1396,7 +1475,6 @@ class _DashboardScreenState
       ),
       child: Column(
         children: [
-          // ─── Avatar ───
           CircleAvatar(
             radius: 30,
             backgroundColor: AppColors.borderSubtle,
@@ -1407,16 +1485,14 @@ class _DashboardScreenState
                       fit: BoxFit.cover,
                       width: 60,
                       height: 60,
-                      errorWidget: (_, __, ___) =>
-                          const Icon(Icons.person,
-                              color: AppColors.brandRed,
-                              size: 28),
+                      errorWidget: (_, __, ___) => const Icon(
+                          Icons.person,
+                          color: AppColors.brandRed,
+                          size: 28),
                     ),
                   )
                 : Text(
-                    name.isNotEmpty
-                        ? name[0].toUpperCase()
-                        : '?',
+                    name.isNotEmpty ? name[0].toUpperCase() : '?',
                     style: GoogleFonts.cormorantGaramond(
                         fontSize: 22,
                         color: AppColors.brandRed,
@@ -1424,113 +1500,198 @@ class _DashboardScreenState
                   ),
           ),
           const SizedBox(height: 10),
-
-          // ─── Name ───
-          Text(
-            name,
-            style: GoogleFonts.inter(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: AppColors.darkText),
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-
-          // ─── Headline / Course ───
-          if (headline.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              headline,
+          Text(name,
               style: GoogleFonts.inter(
-                  fontSize: 10,
-                  color: AppColors.mutedText),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.darkText),
               textAlign: TextAlign.center,
               maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
+              overflow: TextOverflow.ellipsis),
+          if (headline.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(headline,
+                style: GoogleFonts.inter(
+                    fontSize: 10, color: AppColors.mutedText),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis),
           ],
-
-          // ─── Batch ───
           if (batch.isNotEmpty) ...[
             const SizedBox(height: 4),
             Container(
               padding: const EdgeInsets.symmetric(
                   horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color:
-                    AppColors.brandRed.withOpacity(0.08),
+                color: AppColors.brandRed.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(4),
               ),
-              child: Text(
-                'Batch $batch',
-                style: GoogleFonts.inter(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.brandRed),
-              ),
+              child: Text('Batch $batch',
+                  style: GoogleFonts.inter(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.brandRed)),
             ),
           ],
-
           const Spacer(),
 
-          // ─── Connect button ───
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () =>
-                  _sendConnectionRequest(toUid, name),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.brandRed,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(
-                    vertical: 6),
-                minimumSize: Size.zero,
-                tapTargetSize:
-                    MaterialTapTargetSize.shrinkWrap,
-                shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(8)),
-              ),
-              child: Text('Connect',
-                  style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700)),
-            ),
-          ),
+          // ─── Live connection state ───
+          StreamBuilder<DocumentSnapshot>(
+            stream: currentUid.isNotEmpty
+                ? FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(currentUid)
+                    .collection('connections')
+                    .doc(toUid)
+                    .snapshots()
+                : const Stream.empty(),
+            builder: (context, connSnap) {
+              final isConnected =
+                  connSnap.data?.exists ?? false;
 
-          const SizedBox(height: 6),
+              return StreamBuilder<DocumentSnapshot>(
+                stream: currentUid.isNotEmpty
+                    ? FirebaseFirestore.instance
+                        .collection('friend_requests')
+                        .doc('${currentUid}_$toUid')
+                        .snapshots()
+                    : const Stream.empty(),
+                builder: (context, reqSnap) {
+                  final isPending =
+                      reqSnap.data?.exists ?? false;
 
-          // ─── Follow button ───
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: () =>
-                  _followAlumni(toUid, name),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.mutedText,
-                side: const BorderSide(
-                    color: AppColors.borderSubtle),
-                padding: const EdgeInsets.symmetric(
-                    vertical: 6),
-                minimumSize: Size.zero,
-                tapTargetSize:
-                    MaterialTapTargetSize.shrinkWrap,
-                shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(8)),
-              ),
-              child: Text('Follow',
-                  style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600)),
-            ),
+                  if (isConnected) {
+                    return SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: null,
+                        icon: const Icon(
+                            Icons.check_circle,
+                            size: 13,
+                            color: Colors.green),
+                        label: Text('Connected',
+                            style: GoogleFonts.inter(
+                                fontSize: 11,
+                                color: Colors.green,
+                                fontWeight:
+                                    FontWeight.w700)),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(
+                              color: Colors.green),
+                          padding:
+                              const EdgeInsets.symmetric(
+                                  vertical: 6),
+                          minimumSize: Size.zero,
+                          shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(
+                                      8)),
+                        ),
+                      ),
+                    );
+                  }
+
+                  if (isPending) {
+                    return SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: null,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor:
+                              AppColors.mutedText,
+                          side: const BorderSide(
+                              color:
+                                  AppColors.borderSubtle),
+                          padding:
+                              const EdgeInsets.symmetric(
+                                  vertical: 6),
+                          minimumSize: Size.zero,
+                          shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(
+                                      8)),
+                        ),
+                        child: Text('Pending',
+                            style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight:
+                                    FontWeight.w600)),
+                      ),
+                    );
+                  }
+
+                  return Column(children: [
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () =>
+                            _sendConnectionRequest(
+                                toUid, name),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor:
+                              AppColors.brandRed,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding:
+                              const EdgeInsets.symmetric(
+                                  vertical: 6),
+                          minimumSize: Size.zero,
+                          tapTargetSize:
+                              MaterialTapTargetSize
+                                  .shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(
+                                      8)),
+                        ),
+                        child: Text('Connect',
+                            style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight:
+                                    FontWeight.w700)),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: () =>
+                            _followAlumni(toUid, name),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor:
+                              AppColors.mutedText,
+                          side: const BorderSide(
+                              color:
+                                  AppColors.borderSubtle),
+                          padding:
+                              const EdgeInsets.symmetric(
+                                  vertical: 6),
+                          minimumSize: Size.zero,
+                          tapTargetSize:
+                              MaterialTapTargetSize
+                                  .shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(
+                                      8)),
+                        ),
+                        child: Text('Follow',
+                            style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight:
+                                    FontWeight.w600)),
+                      ),
+                    ),
+                  ]);
+                },
+              );
+            },
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   // ══════════════════════════════════════════════
   //  DRAWER

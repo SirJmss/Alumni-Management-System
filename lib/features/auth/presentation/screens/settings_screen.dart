@@ -865,7 +865,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   fontSize: 12, color: AppColors.mutedText))
           : null,
       value: value,
-      activeColor: AppColors.brandRed,
+      activeThumbColor: AppColors.brandRed,
       onChanged: onChanged,
     );
   }

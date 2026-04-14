@@ -1392,55 +1392,58 @@ class _DiscussionDetailScreenState
     }
   }
 
-  Future<void> _deleteReply(String replyId) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        title: Text('Delete Reply',
-            style: GoogleFonts.inter(
-                fontWeight: FontWeight.w700,
-                color: AppColors.brandRed)),
-        content: Text('Delete this reply?',
-            style: GoogleFonts.inter()),
-        actions: [
-          TextButton(
-            onPressed: () =>
-                Navigator.pop(context, false),
-            child: Text('Cancel',
-                style: GoogleFonts.inter(
-                    color: AppColors.mutedText)),
-          ),
-          TextButton(
-            onPressed: () =>
-                Navigator.pop(context, true),
-            child: Text('Delete',
-                style: GoogleFonts.inter(
-                    color: AppColors.brandRed,
-                    fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
-    if (confirm != true) return;
+Future<void> _deleteReply(String replyId) async {
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16)),
+      title: Text('Delete Reply',
+          style: GoogleFonts.inter(
+              fontWeight: FontWeight.w700,
+              color: AppColors.brandRed)),
+      content: Text('Delete this reply?',
+          style: GoogleFonts.inter()),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: Text('Cancel',
+              style: GoogleFonts.inter(
+                  color: AppColors.mutedText)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text('Delete',
+              style: GoogleFonts.inter(
+                  color: AppColors.brandRed,
+                  fontWeight: FontWeight.w600)),
+        ),
+      ],
+    ),
+  );
+  if (confirm != true) return;
 
-    final batch = FirebaseFirestore.instance.batch();
-    batch.delete(FirebaseFirestore.instance
-        .collection('discussions')
-        .doc(widget.discussionId)
-        .collection('replies')
-        .doc(replyId));
-    batch.update(
+  try {
+    final writeBatch = FirebaseFirestore.instance.batch();
+    writeBatch.delete(
+      FirebaseFirestore.instance
+          .collection('discussions')
+          .doc(widget.discussionId)
+          .collection('replies')
+          .doc(replyId),
+    );
+    writeBatch.update(
       FirebaseFirestore.instance
           .collection('discussions')
           .doc(widget.discussionId),
       {'repliesCount': FieldValue.increment(-1)},
     );
-    await batch.commit();
-    _showSnackBar('Reply deleted', isError: false);
+    await writeBatch.commit();
+    if (mounted) _showSnackBar('Reply deleted', isError: false);
+  } catch (e) {
+    if (mounted) _showSnackBar('Error deleting reply: $e', isError: true);
   }
-
+}
   Future<void> _toggleReplyLike(String replyId, int count) async {
     if (widget.currentUid.isEmpty) {
       _showSnackBar('Sign in to like replies', isError: true);
@@ -1921,10 +1924,14 @@ class _DiscussionDetailScreenState
                           final doc = docs[i];
                           final d = doc.data()
                               as Map<String, dynamic>;
-                          return _replyCard(
-                              doc.id, d, (replyId, authorName) {
-                            // Handle reply-to action if needed
-                          });
+                          return _replyCard(doc.id, d, (replyId, authorName) {
+  setState(() {
+    _editingReplyId = replyId;
+    _replyCtrl.text = '@$authorName ';
+  });
+  // Scroll to bottom / focus input
+  FocusScope.of(context).requestFocus(FocusNode());
+});
                         },
                         childCount: docs.length,
                       ),

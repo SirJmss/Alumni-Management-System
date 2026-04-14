@@ -53,7 +53,9 @@ class CsvParser {
     for (int i = 1; i < rows.length; i++) {
       final row = rows[i];
       if (row.every((cell) =>
-          cell.toString().trim().isEmpty)) continue;
+          cell.toString().trim().isEmpty)) {
+        continue;
+      }
 
       String get(int idx) =>
           idx != -1 && idx < row.length

@@ -55,7 +55,9 @@ class ExcelParser {
       final row = sheet.rows[i];
       if (row.every((cell) =>
           cell?.value?.toString().trim().isEmpty ??
-          true)) continue;
+          true)) {
+        continue;
+      }
 
       final firstName = get(row, firstNameIdx);
       final lastName = get(row, lastNameIdx);

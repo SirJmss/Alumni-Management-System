@@ -373,7 +373,7 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen> {
                                   fontSize: 12,
                                   color: AppColors.mutedText)),
                           value: isImportant,
-                          activeColor: AppColors.brandRed,
+                          activeThumbColor: AppColors.brandRed,
                           onChanged: (v) =>
                               setSheetState(() => isImportant = v),
                         ),

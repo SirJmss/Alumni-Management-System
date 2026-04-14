@@ -1,12 +1,36 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// RegistryService
+// FILE: lib/features/admin/data/services/registry_service.dart
+//
+// CHANGES:
+//  1. All scoring now delegates to RegistryMatcher.scoreOne() and
+//     RegistryMatcher.findBestMatch() — no duplicate scoring logic here.
+//
+//  2. _checkByStudentId and _checkByNameAndBatch are simplified: they now
+//     just fetch the right Firestore candidates and hand them to
+//     RegistryMatcher.findBestMatch(). This eliminates the old _score()
+//     method entirely.
+//
+//  3. uploadRecords() auto-match loop now uses RegistryMatcher.findBestMatch()
+//     for consistency — previously it called checkUser() which had its own
+//     path through the old _score() method.
+//
+//  4. After a successful registration, register() in RegisterScreen must now
+//     also write a /student_id_map/{studentId} doc if studentId is non-empty.
+//     That write is documented here but lives in register_screen.dart.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:alumni/features/admin/data/models/alumni_registry_models.dart';
+import 'package:alumni/features/admin/data/services/registry_matcher.dart';
 
 class RegistryService {
   final _db = FirebaseFirestore.instance;
 
-  // ══════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
   //  CHECK USER AGAINST REGISTRY
-  // ══════════════════════════════════════════
+  //  Called by RegisterScreen during the registry check step.
+  // ══════════════════════════════════════════════════════════════════════════
 
   Future<MatchResult> checkUser({
     required String fullName,
@@ -15,6 +39,8 @@ class RegistryService {
     required String email,
     String studentId = '',
   }) async {
+    // ── Fast path: if a studentId is provided, try an exact-ID lookup first ──
+    // This narrows the candidate pool significantly and is deterministic.
     if (studentId.trim().isNotEmpty) {
       final idResult = await _checkByStudentId(
         studentId: studentId.trim(),
@@ -23,9 +49,16 @@ class RegistryService {
         course: course,
         email: email,
       );
-      if (idResult != null) return idResult;
+      // Only short-circuit if we actually found a confident match.
+      // If the ID is in the registry but the name is completely wrong
+      // (score < threshold), fall through to the name+batch path.
+      if (idResult != null &&
+          idResult.confidence >= RegistryMatcher.matchThreshold) {
+        return idResult;
+      }
     }
 
+    // ── Full scan narrowed by batch year ──
     return _checkByNameAndBatch(
       fullName: fullName,
       batch: batch,
@@ -35,6 +68,9 @@ class RegistryService {
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Fetch records matching the given studentId, then score with RegistryMatcher
+  // ─────────────────────────────────────────────────────────────────────────
   Future<MatchResult?> _checkByStudentId({
     required String studentId,
     required String fullName,
@@ -47,41 +83,34 @@ class RegistryService {
           .collection('alumni_registry')
           .where('studentId', isEqualTo: studentId)
           .where('isMatched', isEqualTo: false)
-          .limit(5)
+          .limit(5)  // there should only ever be 1, but guard against dupes
           .get();
 
       if (snap.docs.isEmpty) return null;
 
-      MatchResult? best;
-      for (final doc in snap.docs) {
-        final record =
-            AlumniRecord.fromMap(doc.id, doc.data());
-        final confidence = _score(
-          record: record,
-          inputName: fullName,
-          inputBatch: batch,
-          inputCourse: course,
-          inputEmail: email,
-          inputStudentId: studentId,
-        );
-        if (best == null ||
-            confidence > best.confidence) {
-          best = MatchResult(
-            isMatch: confidence >= 0.65,
-            confidence: confidence,
-            record: record,
-          );
-        }
-      }
-      if (best != null && best.confidence >= 0.65) {
-        return best;
-      }
-      return null;
-    } catch (_) {
+      final candidates = snap.docs
+          .map((d) => AlumniRecord.fromMap(d.id, d.data()))
+          .toList();
+
+      // Use RegistryMatcher as the single scorer
+      final result = RegistryMatcher.findBestMatch(
+        fullName: fullName,
+        batch: batch,
+        course: course,
+        email: email,
+        studentId: studentId,
+        registry: candidates,
+      );
+
+      return result;
+    } catch (e) {
       return null;
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Fetch all unmatched records for the given batch, then score
+  // ─────────────────────────────────────────────────────────────────────────
   Future<MatchResult> _checkByNameAndBatch({
     required String fullName,
     required String batch,
@@ -92,16 +121,18 @@ class RegistryService {
     QuerySnapshot<Map<String, dynamic>> snap;
     try {
       if (batch.isNotEmpty) {
+        // Narrow by batch first — O(batch_size) instead of O(registry_size)
         snap = await _db
             .collection('alumni_registry')
             .where('batch', isEqualTo: batch)
             .where('isMatched', isEqualTo: false)
             .get();
       } else {
+        // No batch — scan up to 500 unmatched records
         snap = await _db
             .collection('alumni_registry')
             .where('isMatched', isEqualTo: false)
-            .limit(300)
+            .limit(500)
             .get();
       }
     } catch (_) {
@@ -114,200 +145,31 @@ class RegistryService {
           isMatch: false, confidence: 0, record: null);
     }
 
-    AlumniRecord? bestRecord;
-    double bestScore = 0;
+    final candidates = snap.docs
+        .map((d) => AlumniRecord.fromMap(d.id, d.data()))
+        .toList();
 
-    for (final doc in snap.docs) {
-      final record =
-          AlumniRecord.fromMap(doc.id, doc.data());
-      final confidence = _score(
-        record: record,
-        inputName: fullName,
-        inputBatch: batch,
-        inputCourse: course,
-        inputEmail: email,
-        inputStudentId: studentId,
-      );
-      if (confidence > bestScore) {
-        bestScore = confidence;
-        bestRecord = record;
-      }
-    }
-
-    return MatchResult(
-      isMatch: bestScore >= 0.65,
-      confidence: bestScore,
-      record: bestRecord,
+    // Delegate entirely to RegistryMatcher
+    return RegistryMatcher.findBestMatch(
+      fullName: fullName,
+      batch: batch,
+      course: course,
+      email: email,
+      studentId: studentId,
+      registry: candidates,
     );
   }
 
-  double _score({
-    required AlumniRecord record,
-    required String inputName,
-    required String inputBatch,
-    required String inputCourse,
-    required String inputEmail,
-    required String inputStudentId,
-  }) {
-    double score = 0.0;
-
-    final recId = record.studentId.trim().toLowerCase();
-    final inId = inputStudentId.trim().toLowerCase();
-    if (recId.isNotEmpty && inId.isNotEmpty) {
-      if (recId == inId) score += 0.40;
-    }
-
-    final nameSim = _nameSimilarity(
-      inputName.trim().toLowerCase(),
-      record.fullName.trim().toLowerCase(),
-    );
-    score += nameSim * 0.30;
-
-    final recBatch = record.batch.trim();
-    final inBatch = inputBatch.trim();
-    if (recBatch.isNotEmpty && inBatch.isNotEmpty) {
-      if (recBatch == inBatch) {
-        score += 0.20;
-      }
-    } else if (recBatch.isEmpty && inBatch.isEmpty) {
-      score += 0.10;
-    }
-
-    final courseSim = _courseSimilarity(
-      inputCourse.trim().toLowerCase(),
-      record.course.trim().toLowerCase(),
-    );
-    score += courseSim * 0.10;
-
-    if (record.email.trim().isNotEmpty &&
-        inputEmail.trim().isNotEmpty &&
-        record.email.trim().toLowerCase() ==
-            inputEmail.trim().toLowerCase()) {
-      score = (score + 0.05).clamp(0.0, 1.0);
-    }
-
-    return score.clamp(0.0, 1.0);
-  }
-
-  double _nameSimilarity(String a, String b) {
-    if (a.isEmpty || b.isEmpty) return 0.0;
-    if (a == b) return 1.0;
-
-    a = _normaliseName(a);
-    b = _normaliseName(b);
-
-    if (a == b) return 1.0;
-
-    final tokenScore = _tokenOverlap(a, b);
-    final levScore = _levenshteinSimilarity(a, b);
-    return (tokenScore * 0.65 + levScore * 0.35)
-        .clamp(0.0, 1.0);
-  }
-
-  String _normaliseName(String s) {
-    return s
-        .replaceAll(RegExp(r'[^\w\s]'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-  }
-
-  double _tokenOverlap(String a, String b) {
-    final tokensA = a.split(' ').toSet();
-    final tokensB = b.split(' ').toSet();
-    tokensA.removeWhere((t) => t.length < 2);
-    tokensB.removeWhere((t) => t.length < 2);
-    if (tokensA.isEmpty || tokensB.isEmpty) return 0.0;
-    final intersection =
-        tokensA.intersection(tokensB).length;
-    final union = tokensA.union(tokensB).length;
-    if (union == 0) return 0.0;
-    return intersection / union;
-  }
-
-  double _levenshteinSimilarity(String a, String b) {
-    final distance = _levenshtein(a, b);
-    final maxLen =
-        a.length > b.length ? a.length : b.length;
-    if (maxLen == 0) return 1.0;
-    return 1.0 - (distance / maxLen);
-  }
-
-  int _levenshtein(String s, String t) {
-    if (s == t) return 0;
-    if (s.isEmpty) return t.length;
-    if (t.isEmpty) return s.length;
-    if (s.length > 60 || t.length > 60) {
-      return (s.length - t.length).abs();
-    }
-    final m = s.length;
-    final n = t.length;
-    final dp = List.generate(
-        m + 1, (i) => List.filled(n + 1, 0));
-    for (var i = 0; i <= m; i++) dp[i][0] = i;
-    for (var j = 0; j <= n; j++) dp[0][j] = j;
-    for (var i = 1; i <= m; i++) {
-      for (var j = 1; j <= n; j++) {
-        if (s[i - 1] == t[j - 1]) {
-          dp[i][j] = dp[i - 1][j - 1];
-        } else {
-          dp[i][j] = 1 +
-              [dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]]
-                  .reduce((a, b) => a < b ? a : b);
-        }
-      }
-    }
-    return dp[m][n];
-  }
-
-  double _courseSimilarity(String a, String b) {
-    if (a.isEmpty || b.isEmpty) return 0.0;
-    if (a == b) return 1.0;
-    a = _expandCourse(a);
-    b = _expandCourse(b);
-    if (a == b) return 1.0;
-    return _tokenOverlap(a, b);
-  }
-
-  String _expandCourse(String s) {
-    const map = {
-      'bsn': 'bs nursing',
-      'bscs': 'bs computer science',
-      'bsit': 'bs information technology',
-      'bsba': 'bs business administration',
-      'bsa': 'bs accountancy',
-      'bsed': 'bs education',
-      'beed': 'bachelor of elementary education',
-      'bsme': 'bs mechanical engineering',
-      'bsce': 'bs civil engineering',
-      'bsee': 'bs electrical engineering',
-      'bsece':
-          'bs electronics and communications engineering',
-      'bshm': 'bs hospitality management',
-      'bstm': 'bs tourism management',
-      'bsmt': 'bs medical technology',
-      'bspt': 'bs physical therapy',
-      'bsphrm': 'bs pharmacy',
-      'ab': 'bachelor of arts',
-      'bs': 'bachelor of science',
-    };
-    String result = s.toLowerCase().trim();
-    map.forEach((abbr, full) {
-      if (result == abbr) result = full;
-    });
-    return result;
-  }
-
-  // ══════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
   //  UPLOAD MANAGEMENT
-  // ══════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
 
   Future<RegistryUpload> uploadRecords({
     required List<AlumniRecord> records,
     required String fileName,
     required String uploadedByName,
   }) async {
-    final batchId =
-        _db.collection('registry_uploads').doc().id;
+    final batchId = _db.collection('registry_uploads').doc().id;
 
     final uploadRef =
         _db.collection('registry_uploads').doc(batchId);
@@ -321,36 +183,35 @@ class RegistryService {
       'uploadedAt': FieldValue.serverTimestamp(),
     });
 
-    // ─── Write records in chunks of 400 ───
+    // ── Write registry records in chunks of 400 ──
     const chunkSize = 400;
     for (var i = 0; i < records.length; i += chunkSize) {
       final end = (i + chunkSize) > records.length
           ? records.length
           : i + chunkSize;
       final chunk = records.sublist(i, end);
-      final writeBatch = _db.batch();
+      final wb = _db.batch();
 
       for (final record in chunk) {
-        final docRef =
-            _db.collection('alumni_registry').doc();
-        writeBatch.set(docRef, {
-          'firstName': record.firstName,
-          'lastName': record.lastName,
-          'fullName': record.fullName,
-          'batch': record.batch,
-          'course': record.course,
-          'email': record.email,
-          'studentId': record.studentId,
+        final docRef = _db.collection('alumni_registry').doc();
+        wb.set(docRef, {
+          'firstName':   record.firstName,
+          'lastName':    record.lastName,
+          'fullName':    record.fullName,
+          'batch':       record.batch,
+          'course':      record.course,
+          'email':       record.email,
+          'studentId':   record.studentId,
           'uploadBatchId': batchId,
-          'isMatched': false,
+          'isMatched':   false,
           'matchedUserId': '',
-          'createdAt': FieldValue.serverTimestamp(),
+          'createdAt':   FieldValue.serverTimestamp(),
         });
       }
-      await writeBatch.commit();
+      await wb.commit();
     }
 
-    // ─── Auto-match existing pending users ───
+    // ── Auto-match existing pending users against the newly uploaded records ──
     int matchedCount = 0;
     try {
       final pendingSnap = await _db
@@ -360,42 +221,67 @@ class RegistryService {
 
       for (final userDoc in pendingSnap.docs) {
         final userData = userDoc.data();
-        final result = await checkUser(
-          fullName: userData['name']?.toString() ?? '',
-          batch: userData['batch']?.toString() ?? '',
-          course: userData['course']?.toString() ?? '',
-          email: userData['email']?.toString() ?? '',
-          studentId:
-              userData['studentId']?.toString() ?? '',
+
+        // Re-fetch fresh unmatched records for this user's batch
+        final userBatch =
+            userData['batch']?.toString().trim() ?? '';
+        final candidateSnap = userBatch.isNotEmpty
+            ? await _db
+                .collection('alumni_registry')
+                .where('batch', isEqualTo: userBatch)
+                .where('isMatched', isEqualTo: false)
+                .get()
+            : await _db
+                .collection('alumni_registry')
+                .where('isMatched', isEqualTo: false)
+                .limit(500)
+                .get();
+
+        if (candidateSnap.docs.isEmpty) continue;
+
+        final candidates = candidateSnap.docs
+            .map((d) => AlumniRecord.fromMap(d.id, d.data()))
+            .toList();
+
+        // Use RegistryMatcher — consistent with all other paths
+        final result = RegistryMatcher.findBestMatch(
+          fullName:  userData['name']?.toString() ?? '',
+          batch:     userBatch,
+          course:    userData['course']?.toString() ?? '',
+          email:     userData['email']?.toString() ?? '',
+          studentId: userData['studentId']?.toString() ?? '',
+          registry:  candidates,
         );
+
         if (result.isMatch && result.record != null) {
           matchedCount++;
-          final userBatch = _db.batch();
-          userBatch.update(
+          final batchWrite = _db.batch();
+
+          batchWrite.update(
             _db.collection('users').doc(userDoc.id),
             {
               'verificationStatus': 'verified',
               'status': 'active',
-              'verifiedAt':
-                  FieldValue.serverTimestamp(),
-              'verifiedBy': 'system_auto',
-              'registryMatchId': result.record!.id,
-              'matchConfidence': result.confidence,
+              'verifiedAt':  FieldValue.serverTimestamp(),
+              'verifiedBy':  'system_auto',
+              'registryMatchId':  result.record!.id,
+              'matchConfidence':  result.confidence,
             },
           );
-          userBatch.update(
-            _db
-                .collection('alumni_registry')
-                .doc(result.record!.id),
+
+          batchWrite.update(
+            _db.collection('alumni_registry').doc(result.record!.id),
             {
-              'isMatched': true,
+              'isMatched':    true,
               'matchedUserId': userDoc.id,
             },
           );
-          await userBatch.commit();
+
+          await batchWrite.commit();
         }
       }
     } catch (e) {
+      // Non-fatal — upload still succeeded even if auto-match fails
     }
 
     await uploadRef.update({
@@ -404,14 +290,14 @@ class RegistryService {
     });
 
     return RegistryUpload(
-      id: batchId,
-      fileName: fileName,
+      id:           batchId,
+      fileName:     fileName,
       totalRecords: records.length,
       matchedCount: matchedCount,
-      status: 'done',
-      uploadedBy: uploadedByName,
+      status:       'done',
+      uploadedBy:   uploadedByName,
       uploadedByName: uploadedByName,
-      uploadedAt: DateTime.now(),
+      uploadedAt:   DateTime.now(),
     );
   }
 
@@ -422,18 +308,16 @@ class RegistryService {
         .get();
 
     const chunkSize = 400;
-    for (var i = 0;
-        i < snap.docs.length;
-        i += chunkSize) {
+    for (var i = 0; i < snap.docs.length; i += chunkSize) {
       final end = (i + chunkSize) > snap.docs.length
           ? snap.docs.length
           : i + chunkSize;
       final chunk = snap.docs.sublist(i, end);
-      final batch = _db.batch();
+      final wb = _db.batch();
       for (final doc in chunk) {
-        batch.delete(doc.reference);
+        wb.delete(doc.reference);
       }
-      await batch.commit();
+      await wb.commit();
     }
     await _db
         .collection('registry_uploads')
@@ -441,9 +325,9 @@ class RegistryService {
         .delete();
   }
 
-  // ══════════════════════════════════════════
-  //  STREAMS — no orderBy to avoid index issues
-  // ══════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
+  //  STREAMS
+  // ══════════════════════════════════════════════════════════════════════════
 
   Stream<List<RegistryUpload>> uploadsStream() {
     return _db
@@ -456,43 +340,33 @@ class RegistryService {
             .toList());
   }
 
-  Stream<List<AlumniRecord>> recordsStream(
-      String uploadId) {
-    // ─── No orderBy — avoids needing a composite index ───
+  Stream<List<AlumniRecord>> recordsStream(String uploadId) {
     return _db
         .collection('alumni_registry')
         .where('uploadBatchId', isEqualTo: uploadId)
         .snapshots()
         .map((snap) {
       final list = snap.docs
-          .map((doc) =>
-              AlumniRecord.fromMap(doc.id, doc.data()))
-          .toList();
-      // Sort client-side
-      list.sort((a, b) =>
-          a.fullName.compareTo(b.fullName));
+          .map((doc) => AlumniRecord.fromMap(doc.id, doc.data()))
+          .toList()
+        ..sort((a, b) => a.fullName.compareTo(b.fullName));
       return list;
     });
   }
 
-  Stream<List<AlumniRecord>> allRecordsStream(
-      {String? search}) {
-    // ─── No orderBy on a filtered query ───
+  Stream<List<AlumniRecord>> allRecordsStream({String? search}) {
     return _db
         .collection('alumni_registry')
         .snapshots()
         .map((snap) {
       final records = snap.docs
-          .map((doc) =>
-              AlumniRecord.fromMap(doc.id, doc.data()))
-          .toList();
-      // Sort client-side
-      records.sort((a, b) =>
-          a.fullName.compareTo(b.fullName));
-      if (search == null || search.isEmpty) {
-        return records;
-      }
-      final q = search.toLowerCase();
+          .map((doc) => AlumniRecord.fromMap(doc.id, doc.data()))
+          .toList()
+        ..sort((a, b) => a.fullName.compareTo(b.fullName));
+
+      if (search == null || search.trim().isEmpty) return records;
+
+      final q = search.trim().toLowerCase();
       return records.where((r) {
         return r.fullName.toLowerCase().contains(q) ||
             r.batch.contains(q) ||

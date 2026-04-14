@@ -371,7 +371,7 @@ class _CareerMilestonesScreenState
                             horizontal: 16, vertical: 4),
                         child:
                             DropdownButtonFormField<String>(
-                          value: type,
+                          initialValue: type,
                           decoration: InputDecoration(
                             labelText: 'Milestone Type',
                             labelStyle: GoogleFonts.inter(
@@ -588,16 +588,9 @@ class _CareerMilestonesScreenState
                         _sidebarSection('NETWORK', [
                           _sidebarItem('Overview',
                               route: '/admin_dashboard'),
-                          _sidebarItem(
-                              'Chapter Management',
-                              route:
-                                  '/chapter_management'),
                         ]),
                         const SizedBox(height: 32),
                         _sidebarSection('ENGAGEMENT', [
-                          _sidebarItem(
-                              'Reunions & Events',
-                              route: '/reunions_events'),
                           _sidebarItem(
                               'Career Milestones',
                               route: '/career_milestones',

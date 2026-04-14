@@ -2178,7 +2178,7 @@ class _UserVerificationScreenState
             child: DataTable(
               columnSpacing: 20,
               headingRowColor:
-                  WidgetStatePropertyAll(
+                  const WidgetStatePropertyAll(
                       AppColors.softWhite),
               headingTextStyle: GoogleFonts.inter(
                   fontSize: 11,
@@ -2405,7 +2405,7 @@ class _UserVerificationScreenState
                         child: DataTable(
                           columnSpacing: 20,
                           headingRowColor:
-                              WidgetStatePropertyAll(
+                              const WidgetStatePropertyAll(
                                   AppColors.softWhite),
                           headingTextStyle:
                               GoogleFonts.inter(
@@ -2530,7 +2530,7 @@ class _UserVerificationScreenState
             child: DataTable(
               columnSpacing: 20,
               headingRowColor:
-                  WidgetStatePropertyAll(
+                  const WidgetStatePropertyAll(
                       AppColors.softWhite),
               headingTextStyle: GoogleFonts.inter(
                   fontSize: 11,
@@ -2861,18 +2861,10 @@ class _UserVerificationScreenState
                           _sidebarItem('Overview',
                               route:
                                   '/admin_dashboard'),
-                          _sidebarItem(
-                              'Chapter Management',
-                              route:
-                                  '/chapter_management'),
                         ]),
                         const SizedBox(height: 32),
                         _sidebarSection(
                             'ENGAGEMENT', [
-                          _sidebarItem(
-                              'Reunions & Events',
-                              route:
-                                  '/reunions_events'),
                           _sidebarItem(
                               'Career Milestones',
                               route:
@@ -3215,7 +3207,7 @@ class _UserVerificationScreenState
         scrollDirection: Axis.horizontal,
         child: DataTable(
           columnSpacing: 20,
-          headingRowColor: WidgetStatePropertyAll(
+          headingRowColor: const WidgetStatePropertyAll(
               AppColors.softWhite),
           headingTextStyle: GoogleFonts.inter(
               fontSize: 11,

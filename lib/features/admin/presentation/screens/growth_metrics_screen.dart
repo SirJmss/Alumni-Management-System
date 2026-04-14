@@ -165,16 +165,9 @@ class _GrowthMetricsScreenState
                         _sidebarSection('NETWORK', [
                           _sidebarItem('Overview',
                               route: '/admin_dashboard'),
-                          _sidebarItem(
-                              'Chapter Management',
-                              route:
-                                  '/chapter_management'),
                         ]),
                         const SizedBox(height: 32),
                         _sidebarSection('ENGAGEMENT', [
-                          _sidebarItem(
-                              'Reunions & Events',
-                              route: '/reunions_events'),
                           _sidebarItem(
                               'Career Milestones',
                               route: '/career_milestones'),
@@ -546,7 +539,7 @@ class _GrowthMetricsScreenState
         gridData: FlGridData(
           show: true,
           drawVerticalLine: false,
-          getDrawingHorizontalLine: (v) => FlLine(
+          getDrawingHorizontalLine: (v) => const FlLine(
             color: AppColors.borderSubtle,
             strokeWidth: 0.5,
           ),
@@ -572,8 +565,9 @@ class _GrowthMetricsScreenState
               showTitles: true,
               getTitlesWidget: (v, m) {
                 final i = v.toInt();
-                if (i < 0 || i >= monthlyGrowth.length)
+                if (i < 0 || i >= monthlyGrowth.length) {
                   return const SizedBox();
+                }
                 return Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
@@ -640,7 +634,7 @@ class _GrowthMetricsScreenState
         gridData: FlGridData(
           show: true,
           drawVerticalLine: false,
-          getDrawingHorizontalLine: (v) => FlLine(
+          getDrawingHorizontalLine: (v) => const FlLine(
             color: AppColors.borderSubtle,
             strokeWidth: 0.5,
           ),
@@ -667,8 +661,9 @@ class _GrowthMetricsScreenState
               getTitlesWidget: (v, m) {
                 final labels = ['Active', 'Inactive'];
                 final i = v.toInt();
-                if (i < 0 || i >= labels.length)
+                if (i < 0 || i >= labels.length) {
                   return const SizedBox();
+                }
                 return Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(

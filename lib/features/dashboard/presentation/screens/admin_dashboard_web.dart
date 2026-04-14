@@ -540,16 +540,9 @@ class _AdminDashboardWebState
                         _sidebarSection('NETWORK', [
                           _sidebarItem('Overview',
                               isActive: true),
-                          _sidebarItem(
-                              'Chapter Management',
-                              route:
-                                  '/chapter_management'),
                         ]),
                         const SizedBox(height: 32),
                         _sidebarSection('ENGAGEMENT', [
-                          _sidebarItem(
-                              'Reunions & Events',
-                              route: '/reunions_events'),
                           _sidebarItem(
                               'Career Milestones',
                               route: '/career_milestones'),

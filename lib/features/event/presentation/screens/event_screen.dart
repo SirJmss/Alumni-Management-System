@@ -65,7 +65,9 @@ class _EventScreenState extends State<EventScreen> {
     if (_userRole == 'admin' ||
         _userRole == 'moderator' ||
         _userRole == 'staff' ||
-        _userRole == 'registrar') return true;
+        _userRole == 'registrar') {
+      return true;
+    }
     return currentUid == creatorUid;
   }
 
@@ -573,9 +575,9 @@ class _EventScreenState extends State<EventScreen> {
             12,
             16,
             MediaQuery.of(context).viewInsets.bottom + 12),
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           color: AppColors.cardWhite,
-          border: const Border(
+          border: Border(
               top: BorderSide(color: AppColors.borderSubtle)),
         ),
         child: Row(

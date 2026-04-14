@@ -249,7 +249,7 @@ class _AddAnnouncementScreenState
                         fontSize: 12,
                         color: AppColors.mutedText)),
                 value: _isImportant,
-                activeColor: AppColors.brandRed,
+                activeThumbColor: AppColors.brandRed,
                 onChanged: (v) =>
                     setState(() => _isImportant = v),
               ),

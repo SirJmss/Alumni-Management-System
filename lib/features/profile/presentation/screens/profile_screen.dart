@@ -226,7 +226,7 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
   // ─── Main profile scaffold ────────────────────────────────────────────────
   Widget _buildProfile(Map<String, dynamic> data) {
     // ✅ Resolve image URLs from multiple possible keys
-    String _resolveUrl(Map<String, dynamic> src, List<String> keys) {
+    String resolveUrl(Map<String, dynamic> src, List<String> keys) {
       for (final k in keys) {
         final raw = src[k]?.toString().trim() ?? '';
         if (raw.isNotEmpty &&
@@ -238,9 +238,9 @@ class _AlumniProfileScreenState extends State<AlumniProfileScreen> {
       return '';
     }
 
-    final coverUrl = _resolveUrl(data, ['coverPictureUrl', 'coverPhotoUrl']);
+    final coverUrl = resolveUrl(data, ['coverPictureUrl', 'coverPhotoUrl']);
     final avatarUrl =
-        _resolveUrl(data, ['profilePictureUrl', 'photoURL', 'avatarUrl']);
+        resolveUrl(data, ['profilePictureUrl', 'photoURL', 'avatarUrl']);
 
     final hasCover = coverUrl.isNotEmpty;
     final hasAvatar = avatarUrl.isNotEmpty;
