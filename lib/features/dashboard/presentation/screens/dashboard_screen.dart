@@ -19,7 +19,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState
     extends State<DashboardScreen> {
-  // ─── User profile ─────────────────────────────
+  // ─── User profile ──────────────────────────
   String userName = 'Guest';
   String userRole = 'Alumni';
   String userBatch = '';
@@ -34,12 +34,12 @@ class _DashboardScreenState
   String userVerificationStatus = 'pending';
   bool isLoadingProfile = true;
 
-  // ─── Metrics ──────────────────────────────────
+  // ─── Metrics ───────────────────────────────
   int totalAlumni = 0;
   int upcomingEvents = 0;
   int activeCourses = 0;
 
-  // ─── Content ──────────────────────────────────
+  // ─── Content ───────────────────────────────
   List<Map<String, dynamic>> recentOpportunities = [];
   List<Map<String, dynamic>> upcomingCalendar = [];
   List<Map<String, dynamic>> nearbyAlumni = [];
@@ -64,10 +64,13 @@ class _DashboardScreenState
       await Future.wait([
         _loadUserProfile(),
         _loadDashboardAggregates(),
-        _loadRecentOpportunities(),
         _loadUpcomingCalendar(),
-        _loadBatchAndCourseMates(),
         _loadRecentAnnouncements(),
+      ]);
+      // Load these after profile so we have course/occupation data
+      await Future.wait([
+        _loadSmartOpportunities(),
+        _loadBatchAndCourseMates(),
       ]);
     } finally {
       if (!mounted) return;
@@ -92,7 +95,6 @@ class _DashboardScreenState
           .collection('users')
           .doc(user.uid)
           .get();
-
       if (!doc.exists) {
         setState(() {
           userName =
@@ -104,7 +106,6 @@ class _DashboardScreenState
         });
         return;
       }
-
       final data = doc.data() ?? <String, dynamic>{};
       String getStr(String key, {String fallback = ''}) {
         final val = data[key]?.toString().trim();
@@ -121,20 +122,18 @@ class _DashboardScreenState
         final photo = getStr('profilePictureUrl',
             fallback: user.photoURL ?? '');
         userPhotoUrl = photo.isNotEmpty ? photo : null;
-        userBatch = getStr('batch',
-            fallback: getStr('batchYear'));
-        userCourse = getStr('course',
-            fallback: getStr('program'));
+        userBatch =
+            getStr('batch', fallback: getStr('batchYear'));
+        userCourse =
+            getStr('course', fallback: getStr('program'));
         userLocation = getStr('location');
         userOccupation = getStr('occupation');
         userCompany = getStr('company');
         userAbout = getStr('about');
         userPhone = getStr('phone');
-        userStatus = getStr('status',
-            fallback: 'pending');
+        userStatus = getStr('status', fallback: 'pending');
         userVerificationStatus =
-            getStr('verificationStatus',
-                fallback: 'pending');
+            getStr('verificationStatus', fallback: 'pending');
       });
     } catch (e) {
       debugPrint('Profile error: $e');
@@ -170,13 +169,178 @@ class _DashboardScreenState
     }
   }
 
-  Future<void> _loadRecentOpportunities() async {
+  // ══════════════════════════════════════════════
+  //  SMART JOB OPPORTUNITIES
+  //  Ranks jobs by relevance to the user's course
+  //  and occupation/past job experience.
+  // ══════════════════════════════════════════════
+
+  Future<void> _loadSmartOpportunities() async {
     try {
       final snap = await FirebaseFirestore.instance
           .collection('opportunities')
           .where('isActive', isEqualTo: true)
           .orderBy('createdAt', descending: true)
-          .limit(3)
+          .limit(50)
+          .get();
+
+      if (!mounted) return;
+
+      final course = userCourse.toLowerCase();
+      final occupation = userOccupation.toLowerCase();
+      final company = userCompany.toLowerCase();
+
+      // ─── Keywords extracted from course ───
+      final courseKeywords =
+          _extractKeywords(course);
+
+      // ─── Keywords from current occupation ───
+      final occupationKeywords =
+          _extractKeywords(occupation);
+      final companyKeywords =
+          _extractKeywords(company);
+
+      final scored = <Map<String, dynamic>>[];
+
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        String get(String key, String fallback) {
+          final v = data[key]?.toString().trim();
+          return (v != null && v.isNotEmpty)
+              ? v
+              : fallback;
+        }
+
+        final jobTitle =
+            get('title', '').toLowerCase();
+        final jobType =
+            get('type', 'Full-time').toLowerCase();
+        final jobLocation =
+            get('location', 'Remote').toLowerCase();
+        final jobCompany =
+            get('company', 'Confidential').toLowerCase();
+        final jobDesc =
+            get('description', '').toLowerCase();
+        final jobCategory =
+            get('category', '').toLowerCase();
+        final jobRequiredCourse =
+            get('requiredCourse', '').toLowerCase();
+
+        int score = 0;
+
+        // ─── Course match (highest weight) ───
+        // If job has a requiredCourse field
+        if (jobRequiredCourse.isNotEmpty &&
+            course.isNotEmpty) {
+          if (jobRequiredCourse.contains(course) ||
+              course.contains(jobRequiredCourse)) {
+            score += 60;
+          }
+        }
+
+        // Course keywords in job title or description
+        for (final kw in courseKeywords) {
+          if (kw.length < 3) continue;
+          if (jobTitle.contains(kw)) score += 25;
+          if (jobCategory.contains(kw)) score += 20;
+          if (jobDesc.contains(kw)) score += 10;
+        }
+
+        // ─── Occupation / experience match ───
+        for (final kw in occupationKeywords) {
+          if (kw.length < 3) continue;
+          if (jobTitle.contains(kw)) score += 30;
+          if (jobCategory.contains(kw)) score += 15;
+          if (jobDesc.contains(kw)) score += 8;
+        }
+
+        // ─── Company field match ───
+        for (final kw in companyKeywords) {
+          if (kw.length < 3) continue;
+          if (jobCompany.contains(kw)) score += 10;
+        }
+
+        // ─── Broad category matching ───
+        final broadMap = {
+          'nursing': ['nurse', 'health', 'medical', 'hospital', 'clinical', 'care'],
+          'computer science': ['software', 'developer', 'engineer', 'tech', 'it', 'coding', 'programmer', 'data'],
+          'information technology': ['it', 'tech', 'support', 'network', 'system', 'software', 'developer'],
+          'business administration': ['business', 'management', 'admin', 'operations', 'executive', 'analyst'],
+          'accountancy': ['accounting', 'finance', 'audit', 'tax', 'bookkeeping', 'financial'],
+          'education': ['teacher', 'tutor', 'instructor', 'academic', 'training', 'educator'],
+          'engineering': ['engineer', 'technical', 'construction', 'design', 'manufacturing'],
+          'hospitality management': ['hotel', 'hospitality', 'restaurant', 'tourism', 'food', 'events'],
+          'tourism management': ['travel', 'tourism', 'tour', 'hospitality', 'airline'],
+          'medical technology': ['lab', 'laboratory', 'medical', 'diagnostic', 'pathology'],
+          'pharmacy': ['pharma', 'drug', 'medicine', 'dispensary', 'clinical'],
+        };
+
+        for (final entry in broadMap.entries) {
+          if (course.contains(entry.key) ||
+              entry.key.contains(course)) {
+            for (final synonym in entry.value) {
+              if (jobTitle.contains(synonym)) score += 15;
+              if (jobDesc.contains(synonym)) score += 5;
+            }
+          }
+        }
+
+        scored.add({
+          'id': doc.id,
+          'title': get('title', 'Opportunity'),
+          'type': get('type', 'Full-time'),
+          'location': get('location', 'Remote'),
+          'company': get('company', 'Confidential'),
+          'description': get('description', ''),
+          'category': get('category', ''),
+          'score': score,
+          'isRelevant': score > 0,
+        });
+      }
+
+      // Sort by relevance score, then show relevant first
+      scored.sort((a, b) {
+        final diff = (b['score'] as int)
+            .compareTo(a['score'] as int);
+        return diff;
+      });
+
+      setState(() {
+        // Show top 5 — if no relevant ones, show top 3 by date
+        recentOpportunities =
+            scored.take(5).toList();
+      });
+    } catch (e) {
+      debugPrint('Smart opportunities error: $e');
+      // Fallback to simple load
+      await _loadFallbackOpportunities();
+    }
+  }
+
+  List<String> _extractKeywords(String text) {
+    if (text.isEmpty) return [];
+    // Remove common filler words
+    const stopWords = {
+      'of', 'in', 'the', 'a', 'an', 'and', 'or',
+      'for', 'to', 'at', 'by', 'with', 'bs', 'ab',
+      'bachelor', 'science', 'arts', 'degree'
+    };
+    return text
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\w\s]'), ' ')
+        .split(RegExp(r'\s+'))
+        .where((w) =>
+            w.length >= 3 && !stopWords.contains(w))
+        .toList();
+  }
+
+  Future<void> _loadFallbackOpportunities() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('opportunities')
+          .where('isActive', isEqualTo: true)
+          .orderBy('createdAt', descending: true)
+          .limit(5)
           .get();
       if (!mounted) return;
       setState(() {
@@ -195,11 +359,14 @@ class _DashboardScreenState
             'type': get('type', 'Full-time'),
             'location': get('location', 'Remote'),
             'company': get('company', 'Confidential'),
+            'description': get('description', ''),
+            'score': 0,
+            'isRelevant': false,
           };
         }).toList();
       });
     } catch (e) {
-      debugPrint('Opportunities error: $e');
+      debugPrint('Fallback opportunities error: $e');
     }
   }
 
@@ -219,11 +386,13 @@ class _DashboardScreenState
           final ts = data['startDate'];
           DateTime? date;
           if (ts is Timestamp) date = ts.toDate();
-          final title =
-              (data['title']?.toString().trim().isNotEmpty ??
+          final title = (data['title']
+                          ?.toString()
+                          .trim()
+                          .isNotEmpty ??
                       false)
-                  ? data['title'].toString().trim()
-                  : 'Upcoming event';
+              ? data['title'].toString().trim()
+              : 'Upcoming event';
           return {
             'id': doc.id,
             'title': title,
@@ -248,118 +417,158 @@ class _DashboardScreenState
     }
   }
 
-// Replace your existing _loadNearbyAlumni() with this
-Future<void> _loadBatchAndCourseMates() async {
-  try {
-    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    if (currentUid.isEmpty) return;
+  // ══════════════════════════════════════════════
+  //  SMART ALUMNI YOU MAY KNOW
+  //  Priority:
+  //    1. Same batch + same course (score 90)
+  //    2. Same batch only (score 50)
+  //    3. Same course only (score 40)
+  //    4. Everyone else (score 0, shown as fallback)
+  // ══════════════════════════════════════════════
 
-    // Get current user's batch and course
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(currentUid)
-        .get();
+  Future<void> _loadBatchAndCourseMates() async {
+    try {
+      final currentUid =
+          FirebaseAuth.instance.currentUser?.uid ?? '';
+      if (currentUid.isEmpty) return;
 
-    if (!userDoc.exists) return;
+      final myBatch = userBatch.trim();
+      final myCourse =
+          userCourse.trim().toLowerCase();
 
-    final userData = userDoc.data() ?? {};
-    final myBatch = userData['batch']?.toString().trim() ?? '';
-    final myCourse = userData['course']?.toString().trim().toLowerCase() ?? '';
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .where('role', isEqualTo: 'alumni')
+          .where('status', isEqualTo: 'active')
+          .where('verificationStatus', isEqualTo: 'verified')
+          .limit(50)
+          .get();
 
-    if (myBatch.isEmpty && myCourse.isEmpty) {
-      // Fallback to random if user has no batch/course
-      await _loadRandomAlumni(currentUid);
-      return;
-    }
+      if (!mounted) return;
 
-    final snap = await FirebaseFirestore.instance
-        .collection('users')
-        .where('role', isEqualTo: 'alumni')
-        .where('status', isEqualTo: 'active')
-        .where('verificationStatus', isEqualTo: 'verified')
-        .limit(30) // fetch more to filter properly
-        .get();
+      final List<Map<String, dynamic>> scored = [];
 
-    if (!mounted) return;
+      for (var doc in snap.docs) {
+        if (doc.id == currentUid) continue;
 
-    final List<Map<String, dynamic>> mates = [];
+        final data = doc.data();
+        final batch =
+            data['batch']?.toString().trim() ?? '';
+        final course = data['course']
+                ?.toString()
+                .trim()
+                .toLowerCase() ??
+            '';
+        final name =
+            data['name']?.toString().trim() ?? 'Alumni';
+        final avatarUrl =
+            data['profilePictureUrl']?.toString() ?? '';
+        final headline =
+            data['headline']?.toString() ??
+                data['course']?.toString() ??
+                '';
 
-    for (var doc in snap.docs) {
-      if (doc.id == currentUid) continue;
+        int score = 0;
+        String matchLabel = '';
 
-      final data = doc.data();
-      final batch = data['batch']?.toString().trim() ?? '';
-      final course = data['course']?.toString().trim().toLowerCase() ?? '';
-      final name = data['name']?.toString().trim() ?? 'Alumni';
-      final avatarUrl = data['profilePictureUrl']?.toString() ?? '';
-      final headline = data['headline']?.toString() ?? data['course']?.toString() ?? '';
+        final sameBatch =
+            myBatch.isNotEmpty && batch == myBatch;
+        final sameCourse =
+            myCourse.isNotEmpty && course == myCourse;
 
-      int score = 0;
-      if (batch.isNotEmpty && batch == myBatch) score += 50;
-      if (course.isNotEmpty && course == myCourse) score += 40;
+        if (sameBatch && sameCourse) {
+          score = 90;
+          matchLabel = 'Same batch & course';
+        } else if (sameBatch) {
+          score = 50;
+          matchLabel = 'Batch $batch';
+        } else if (sameCourse) {
+          score = 40;
+          matchLabel = userCourse;
+        }
 
-      if (score > 0) {
-        mates.add({
-          'uid': doc.id,
-          'name': name,
-          'headline': headline,
-          'batch': batch,
-          'course': course,
-          'avatarUrl': avatarUrl,
-          'location': data['location']?.toString() ?? '',
-          'score': score,
-        });
+        // Only include people with some relevance
+        // If user has no batch/course set, show everyone
+        if (score > 0 ||
+            (myBatch.isEmpty && myCourse.isEmpty)) {
+          scored.add({
+            'uid': doc.id,
+            'name': name,
+            'headline': headline,
+            'batch': batch,
+            'course': data['course']?.toString() ?? '',
+            'avatarUrl': avatarUrl,
+            'location':
+                data['location']?.toString() ?? '',
+            'score': score,
+            'matchLabel': matchLabel,
+          });
+        }
       }
+
+      // Sort: highest score first, then alphabetically
+      scored.sort((a, b) {
+        final diff = (b['score'] as int)
+            .compareTo(a['score'] as int);
+        if (diff != 0) return diff;
+        return (a['name'] as String)
+            .compareTo(b['name'] as String);
+      });
+
+      // If scored is empty (no matches), show random alumni
+      if (scored.isEmpty) {
+        await _loadRandomAlumni(currentUid);
+        return;
+      }
+
+      setState(() {
+        nearbyAlumni = scored.take(8).toList();
+      });
+    } catch (e) {
+      debugPrint('Batch & Course mates error: $e');
+      await _loadRandomAlumni(
+          FirebaseAuth.instance.currentUser?.uid ?? '');
     }
-
-    // Sort by score (best matches first)
-    mates.sort((a, b) => (b['score'] as int).compareTo(a['score'] as int));
-
-    // Take top 8
-    setState(() {
-      nearbyAlumni = mates.take(8).toList();
-    });
-  } catch (e) {
-    debugPrint('Batch & Course mates error: $e');
-    // Fallback to random
-    await _loadRandomAlumni(FirebaseAuth.instance.currentUser?.uid ?? '');
   }
-}
 
-// Fallback: random verified alumni
-Future<void> _loadRandomAlumni(String currentUid) async {
-  try {
-    final snap = await FirebaseFirestore.instance
-        .collection('users')
-        .where('role', isEqualTo: 'alumni')
-        .where('status', isEqualTo: 'active')
-        .where('verificationStatus', isEqualTo: 'verified')
-        .limit(20)
-        .get();
-
-    if (!mounted) return;
-
-    final filtered = snap.docs
-        .where((d) => d.id != currentUid)
-        .take(8)
-        .map((d) {
-      final data = d.data();
-      return {
-        'uid': d.id,
-        'name': data['name']?.toString() ?? 'Alumni',
-        'headline': data['headline']?.toString() ?? data['course']?.toString() ?? 'Alumni',
-        'batch': data['batch']?.toString() ?? '',
-        'course': data['course']?.toString() ?? '',
-        'avatarUrl': data['profilePictureUrl']?.toString() ?? '',
-        'location': data['location']?.toString() ?? '',
-      };
-    }).toList();
-
-    setState(() => nearbyAlumni = filtered);
-  } catch (e) {
-    debugPrint('Random alumni error: $e');
+  Future<void> _loadRandomAlumni(
+      String currentUid) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .where('role', isEqualTo: 'alumni')
+          .where('status', isEqualTo: 'active')
+          .where('verificationStatus', isEqualTo: 'verified')
+          .limit(20)
+          .get();
+      if (!mounted) return;
+      final filtered = snap.docs
+          .where((d) => d.id != currentUid)
+          .take(8)
+          .map((d) {
+        final data = d.data();
+        return {
+          'uid': d.id,
+          'name': data['name']?.toString() ?? 'Alumni',
+          'headline': data['headline']?.toString() ??
+              data['course']?.toString() ??
+              'Alumni',
+          'batch': data['batch']?.toString() ?? '',
+          'course': data['course']?.toString() ?? '',
+          'avatarUrl':
+              data['profilePictureUrl']?.toString() ??
+                  '',
+          'location':
+              data['location']?.toString() ?? '',
+          'score': 0,
+          'matchLabel': '',
+        };
+      }).toList();
+      setState(() => nearbyAlumni = filtered);
+    } catch (e) {
+      debugPrint('Random alumni error: $e');
+    }
   }
-}
 
   Future<void> _loadRecentAnnouncements() async {
     try {
@@ -385,8 +594,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
             'category':
                 data['category']?.toString() ?? '',
             'date': date != null
-                ? DateFormat('MMM dd, yyyy')
-                    .format(date)
+                ? DateFormat('MMM dd, yyyy').format(date)
                 : '',
           };
         }).toList();
@@ -404,7 +612,6 @@ Future<void> _loadRandomAlumni(String currentUid) async {
         FirebaseAuth.instance.currentUser?.uid ?? '';
     if (fromUid.isEmpty) return;
 
-    // ─── Validation: check not already connected ───
     final existing = await FirebaseFirestore.instance
         .collection('users')
         .doc(fromUid)
@@ -419,7 +626,6 @@ Future<void> _loadRandomAlumni(String currentUid) async {
       return;
     }
 
-    // ─── Validation: check no pending request ───
     final pendingReq = await FirebaseFirestore.instance
         .collection('friend_requests')
         .doc('${fromUid}_$toUid')
@@ -452,7 +658,8 @@ Future<void> _loadRandomAlumni(String currentUid) async {
           fromDoc.data()?['name']?.toString() ??
               'Someone';
 
-      await NotificationService.sendFriendRequestNotification(
+      await NotificationService
+          .sendFriendRequestNotification(
         toUid: toUid,
         fromName: fromName,
         fromUid: fromUid,
@@ -475,7 +682,6 @@ Future<void> _loadRandomAlumni(String currentUid) async {
         FirebaseAuth.instance.currentUser?.uid ?? '';
     if (fromUid.isEmpty) return;
 
-    // ─── Validation: already following? ───
     final existing = await FirebaseFirestore.instance
         .collection('users')
         .doc(fromUid)
@@ -492,32 +698,32 @@ Future<void> _loadRandomAlumni(String currentUid) async {
 
     try {
       final now = FieldValue.serverTimestamp();
-      final batch =
+      final writeBatch =
           FirebaseFirestore.instance.batch();
 
-      batch.set(
+      writeBatch.set(
         FirebaseFirestore.instance
             .collection('users')
             .doc(fromUid)
             .collection('following')
             .doc(toUid),
-        {'followedAt': now},
+        {'followedAt': now, 'uid': toUid},
       );
-      batch.set(
+      writeBatch.set(
         FirebaseFirestore.instance
             .collection('users')
             .doc(toUid)
             .collection('followers')
             .doc(fromUid),
-        {'followedAt': now},
+        {'followedAt': now, 'uid': fromUid},
       );
-      batch.update(
+      writeBatch.update(
         FirebaseFirestore.instance
             .collection('users')
             .doc(toUid),
         {'followersCount': FieldValue.increment(1)},
       );
-      await batch.commit();
+      await writeBatch.commit();
 
       if (mounted) {
         _showSnackBar('Now following $toName!',
@@ -584,8 +790,6 @@ Future<void> _loadRandomAlumni(String currentUid) async {
           context, '/login', (route) => false);
     }
   }
-
-  // ─── Profile completeness ──────────────────────
 
   int get _profileCompletion {
     int score = 0;
@@ -662,6 +866,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
           ),
         ),
         actions: [
+          // ─── Notification bell with live count ───
           StreamBuilder<int>(
             stream: NotificationService.unreadCountStream(
                 currentUid),
@@ -695,8 +900,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 8,
-                              fontWeight:
-                                  FontWeight.bold,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
@@ -731,7 +935,6 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                 physics:
                     const AlwaysScrollableScrollPhysics(),
                 slivers: [
-                  // ─── Hero ───
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(
                         20, 24, 20, 0),
@@ -741,32 +944,26 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                     ),
                   ),
 
-                  // ─── Verification / Rejection banner ───
                   if (isPending || isRejected)
                     SliverPadding(
-                      padding:
-                          const EdgeInsets.fromLTRB(
-                              20, 16, 20, 0),
+                      padding: const EdgeInsets.fromLTRB(
+                          20, 16, 20, 0),
                       sliver: SliverToBoxAdapter(
                         child:
                             _buildVerificationBanner(),
                       ),
                     ),
 
-                  // ─── Profile completion (only for verified) ───
-                  if (isVerified &&
-                      _profileCompletion < 80)
+                  if (isVerified && _profileCompletion < 80)
                     SliverPadding(
-                      padding:
-                          const EdgeInsets.fromLTRB(
-                              20, 16, 20, 0),
+                      padding: const EdgeInsets.fromLTRB(
+                          20, 16, 20, 0),
                       sliver: SliverToBoxAdapter(
                         child:
                             _buildProfileCompletionBanner(),
                       ),
                     ),
 
-                  // ─── Quick actions ───
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(
                         20, 20, 20, 0),
@@ -776,7 +973,6 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                     ),
                   ),
 
-                  // ─── Metrics ───
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(
                         20, 20, 20, 0),
@@ -785,7 +981,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                     ),
                   ),
 
-                  // ─── Friend requests ───
+                  // ─── Friend requests banner ───
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(
                         20, 24, 20, 0),
@@ -795,31 +991,27 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                     ),
                   ),
 
-                  // ─── Upcoming Events ───
                   if (upcomingCalendar.isNotEmpty)
                     SliverPadding(
-                      padding:
-                          const EdgeInsets.fromLTRB(
-                              20, 8, 20, 0),
+                      padding: const EdgeInsets.fromLTRB(
+                          20, 8, 20, 0),
                       sliver: SliverToBoxAdapter(
                         child:
                             _buildUpcomingEventsSection(),
                       ),
                     ),
 
-                  // ─── Announcements ───
                   if (recentAnnouncements.isNotEmpty)
                     SliverPadding(
-                      padding:
-                          const EdgeInsets.fromLTRB(
-                              20, 24, 20, 0),
+                      padding: const EdgeInsets.fromLTRB(
+                          20, 24, 20, 0),
                       sliver: SliverToBoxAdapter(
                         child:
                             _buildAnnouncementsSection(),
                       ),
                     ),
 
-                  // ─── Opportunities ───
+                  // ─── Smart Job Opportunities ───
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(
                         20, 24, 20, 0),
@@ -829,12 +1021,10 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                     ),
                   ),
 
-                  // ─── Alumni Network ───
                   if (nearbyAlumni.isNotEmpty)
                     SliverPadding(
-                      padding:
-                          const EdgeInsets.fromLTRB(
-                              20, 24, 20, 0),
+                      padding: const EdgeInsets.fromLTRB(
+                          20, 24, 20, 0),
                       sliver: SliverToBoxAdapter(
                         child:
                             _buildAlumniNetworkSection(
@@ -863,8 +1053,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
       children: [
         Text('Welcome back,',
             style: GoogleFonts.inter(
-                fontSize: 13,
-                color: AppColors.mutedText)),
+                fontSize: 13, color: AppColors.mutedText)),
         const SizedBox(height: 4),
         Text(firstName,
             style: GoogleFonts.cormorantGaramond(
@@ -882,11 +1071,11 @@ Future<void> _loadRandomAlumni(String currentUid) async {
               _buildBadge(Icons.school_outlined,
                   'Class of $userBatch'),
             if (userCourse.isNotEmpty)
-              _buildBadge(Icons.auto_stories_outlined,
-                  userCourse),
+              _buildBadge(
+                  Icons.auto_stories_outlined, userCourse),
             if (userLocation.isNotEmpty)
-              _buildBadge(Icons.location_on_outlined,
-                  userLocation),
+              _buildBadge(
+                  Icons.location_on_outlined, userLocation),
             _buildBadge(
                 Icons.verified_user_outlined, userRole),
           ],
@@ -903,8 +1092,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
             ),
             child: Row(children: [
               Icon(Icons.info_outline,
-                  size: 16,
-                  color: Colors.amber.shade700),
+                  size: 16, color: Colors.amber.shade700),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(errorMessage!,
@@ -919,7 +1107,6 @@ Future<void> _loadRandomAlumni(String currentUid) async {
     );
   }
 
-  // ─── Verification Status Banner ───────────────
   Widget _buildVerificationBanner() {
     if (isRejected) {
       return Container(
@@ -927,8 +1114,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
         decoration: BoxDecoration(
           color: Colors.red.shade50,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: Colors.red.shade200),
+          border: Border.all(color: Colors.red.shade200),
         ),
         child: Row(children: [
           Container(
@@ -971,8 +1157,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
       decoration: BoxDecoration(
         color: Colors.orange.shade50,
         borderRadius: BorderRadius.circular(12),
-        border:
-            Border.all(color: Colors.orange.shade200),
+        border: Border.all(color: Colors.orange.shade200),
       ),
       child: Row(children: [
         Container(
@@ -988,8 +1173,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
         const SizedBox(width: 12),
         Expanded(
           child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Verification Pending',
                   style: GoogleFonts.inter(
@@ -1013,7 +1197,6 @@ Future<void> _loadRandomAlumni(String currentUid) async {
     );
   }
 
-  // ─── Profile Completion Banner ─────────────────
   Widget _buildProfileCompletionBanner() {
     final pct = _profileCompletion;
     final missing = _missingFields;
@@ -1049,11 +1232,9 @@ Future<void> _loadRandomAlumni(String currentUid) async {
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
               value: pct / 100,
-              backgroundColor:
-                  AppColors.borderSubtle,
-              valueColor:
-                  const AlwaysStoppedAnimation(
-                      AppColors.brandRed),
+              backgroundColor: AppColors.borderSubtle,
+              valueColor: const AlwaysStoppedAnimation(
+                  AppColors.brandRed),
               minHeight: 6,
             ),
           ),
@@ -1080,8 +1261,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                         color: AppColors.brandRed)),
                 const SizedBox(width: 4),
                 const Icon(Icons.arrow_forward,
-                    size: 12,
-                    color: AppColors.brandRed),
+                    size: 12, color: AppColors.brandRed),
               ],
             ),
           ),
@@ -1090,11 +1270,10 @@ Future<void> _loadRandomAlumni(String currentUid) async {
     );
   }
 
-  // ─── Quick Actions ─────────────────────────────
   Widget _buildQuickActionsRow(String currentUid) {
     return StreamBuilder<int>(
-      stream: NotificationService.unreadCountStream(
-          currentUid),
+      stream:
+          NotificationService.unreadCountStream(currentUid),
       builder: (context, snapshot) {
         final notifCount = snapshot.data ?? 0;
         return SizedBox(
@@ -1145,7 +1324,6 @@ Future<void> _loadRandomAlumni(String currentUid) async {
     );
   }
 
-  // ─── Metrics Row ───────────────────────────────
   Widget _buildMetricsRow() {
     return Container(
       padding: const EdgeInsets.symmetric(
@@ -1175,7 +1353,6 @@ Future<void> _loadRandomAlumni(String currentUid) async {
     );
   }
 
-  // ─── Upcoming Events ───────────────────────────
   Widget _buildUpcomingEventsSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1214,8 +1391,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border:
-              Border.all(color: AppColors.borderSubtle),
+          border: Border.all(color: AppColors.borderSubtle),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1278,7 +1454,9 @@ Future<void> _loadRandomAlumni(String currentUid) async {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            if ((event['location'] ?? '').toString().isNotEmpty) ...[
+            if ((event['location'] ?? '')
+                .toString()
+                .isNotEmpty) ...[
               const SizedBox(height: 4),
               Row(children: [
                 const Icon(Icons.location_on_outlined,
@@ -1302,7 +1480,6 @@ Future<void> _loadRandomAlumni(String currentUid) async {
     );
   }
 
-  // ─── Announcements ─────────────────────────────
   Widget _buildAnnouncementsSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1314,25 +1491,22 @@ Future<void> _loadRandomAlumni(String currentUid) async {
               context, '/announcements'),
         ),
         const SizedBox(height: 16),
-        ...recentAnnouncements
-            .map(_announcementCard),
+        ...recentAnnouncements.map(_announcementCard),
       ],
     );
   }
 
-  Widget _announcementCard(
-      Map<String, dynamic> ann) {
+  Widget _announcementCard(Map<String, dynamic> ann) {
     return GestureDetector(
-      onTap: () => Navigator.pushNamed(
-          context, '/announcements'),
+      onTap: () =>
+          Navigator.pushNamed(context, '/announcements'),
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border:
-              Border.all(color: AppColors.borderSubtle),
+          border: Border.all(color: AppColors.borderSubtle),
         ),
         child: Row(children: [
           Container(
@@ -1342,10 +1516,8 @@ Future<void> _loadRandomAlumni(String currentUid) async {
               color: AppColors.brandRed.withOpacity(0.08),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(
-                Icons.campaign_outlined,
-                color: AppColors.brandRed,
-                size: 18),
+            child: const Icon(Icons.campaign_outlined,
+                color: AppColors.brandRed, size: 18),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1398,42 +1570,268 @@ Future<void> _loadRandomAlumni(String currentUid) async {
     );
   }
 
-  // ─── Opportunities ─────────────────────────────
+  // ══════════════════════════════════════════════
+  //  SMART OPPORTUNITIES SECTION
+  // ══════════════════════════════════════════════
+
   Widget _buildOpportunitiesSection() {
+    final hasRelevant =
+        recentOpportunities.any((o) => (o['score'] as int? ?? 0) > 0);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionHeader(
-          'Recommended for you',
+          hasRelevant
+              ? 'Jobs For You'
+              : 'Job Opportunities',
           'VIEW ALL',
-          onTap: () => Navigator.pushNamed(
-              context, '/events'),
+          onTap: () =>
+              Navigator.pushNamed(context, '/events'),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 4),
+        if (userCourse.isNotEmpty && hasRelevant)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              'Matched to your course and experience',
+              style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: AppColors.mutedText,
+                  fontStyle: FontStyle.italic),
+            ),
+          ),
         if (recentOpportunities.isEmpty)
-          _buildEmptyState('No opportunities listed')
+          _buildEmptyState('No opportunities listed yet')
         else
-          ...recentOpportunities
-              .map(_opportunityCard),
+          ...recentOpportunities.map(_opportunityCard),
       ],
     );
   }
 
-  // ─── Alumni Network ────────────────────────────
-  Widget _buildAlumniNetworkSection(
-      String currentUid) {
+  Widget _opportunityCard(Map<String, dynamic> op) {
+    final score = op['score'] as int? ?? 0;
+    final isRelevant = score > 0;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(
+          color: isRelevant
+              ? AppColors.brandRed.withOpacity(0.25)
+              : AppColors.borderSubtle,
+          width: isRelevant ? 1.5 : 1.0,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // ─── Relevance banner ───
+          if (isRelevant)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.brandRed.withOpacity(0.06),
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(13)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.auto_awesome,
+                    size: 12, color: AppColors.brandRed),
+                const SizedBox(width: 6),
+                Text(
+                  score >= 60
+                      ? 'Matches your course'
+                      : score >= 30
+                          ? 'Matches your experience'
+                          : 'Recommended for you',
+                  style: GoogleFonts.inter(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.brandRed,
+                      letterSpacing: 0.3),
+                ),
+              ]),
+            ),
+
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment:
+                      MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding:
+                          const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.brandRed
+                            .withOpacity(0.08),
+                        borderRadius:
+                            BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        (op['type'] ?? '').toUpperCase(),
+                        style: GoogleFonts.inter(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w900,
+                            color: AppColors.brandRed,
+                            letterSpacing: 1),
+                      ),
+                    ),
+                    Row(children: [
+                      const Icon(
+                          Icons.location_on_outlined,
+                          size: 11,
+                          color: AppColors.mutedText),
+                      const SizedBox(width: 2),
+                      Text(op['location'] ?? '',
+                          style: GoogleFonts.inter(
+                              fontSize: 11,
+                              color: AppColors.mutedText)),
+                    ]),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(op['title'] ?? '',
+                    style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.darkText)),
+                const SizedBox(height: 4),
+                Row(children: [
+                  const Icon(Icons.business_outlined,
+                      size: 13,
+                      color: AppColors.mutedText),
+                  const SizedBox(width: 4),
+                  Text(op['company'] ?? '',
+                      style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: AppColors.mutedText)),
+                ]),
+                if ((op['description'] ?? '')
+                    .toString()
+                    .isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    op['description'].toString(),
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppColors.mutedText,
+                        height: 1.4),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment:
+                      MainAxisAlignment.spaceBetween,
+                  children: [
+                    if ((op['category'] ?? '')
+                        .toString()
+                        .isNotEmpty)
+                      Container(
+                        padding:
+                            const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.grey
+                              .withOpacity(0.1),
+                          borderRadius:
+                              BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          op['category'].toString(),
+                          style: GoogleFonts.inter(
+                              fontSize: 10,
+                              color: AppColors.mutedText,
+                              fontWeight:
+                                  FontWeight.w600),
+                        ),
+                      )
+                    else
+                      const SizedBox(),
+                    Row(children: [
+                      Text('APPLY NOW',
+                          style: GoogleFonts.inter(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1,
+                              color: AppColors.brandRed)),
+                      const SizedBox(width: 6),
+                      const Icon(
+                          Icons.arrow_forward_rounded,
+                          size: 14,
+                          color: AppColors.brandRed),
+                    ]),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════
+  //  ALUMNI NETWORK SECTION
+  // ══════════════════════════════════════════════
+
+  Widget _buildAlumniNetworkSection(String currentUid) {
+    // Determine the section subtitle
+    final hasSameBatchAndCourse = nearbyAlumni
+        .any((a) => (a['score'] as int? ?? 0) >= 90);
+    final hasSameBatch = nearbyAlumni
+        .any((a) => (a['score'] as int? ?? 0) >= 50);
+
+    String subtitle = 'People you may know';
+    if (hasSameBatchAndCourse) {
+      subtitle =
+          'From your batch & ${userCourse.isNotEmpty ? userCourse : 'course'}';
+    } else if (hasSameBatch && userBatch.isNotEmpty) {
+      subtitle = 'From Batch $userBatch';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionHeader(
           'Alumni You May Know',
           'SEE ALL',
-          onTap: () => Navigator.pushNamed(
-              context, '/friends'),
+          onTap: () =>
+              Navigator.pushNamed(context, '/friends'),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 4),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text(
+            subtitle,
+            style: GoogleFonts.inter(
+                fontSize: 11,
+                color: AppColors.mutedText,
+                fontStyle: FontStyle.italic),
+          ),
+        ),
         SizedBox(
-          height: 220,
+          height: 240,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: nearbyAlumni.length,
@@ -1450,248 +1848,317 @@ Future<void> _loadRandomAlumni(String currentUid) async {
     );
   }
 
- Widget _alumniNetworkCard(
-    Map<String, dynamic> alumni, String currentUid) {
-  final toUid = alumni['uid'].toString();
-  final name = alumni['name'].toString();
-  final avatarUrl = alumni['avatarUrl'].toString();
-  final headline = alumni['headline'].toString();
-  final batch = alumni['batch'].toString();
+  Widget _alumniNetworkCard(
+      Map<String, dynamic> alumni, String currentUid) {
+    final toUid = alumni['uid'].toString();
+    final name = alumni['name'].toString();
+    final avatarUrl = alumni['avatarUrl'].toString();
+    final headline = alumni['headline'].toString();
+    final batch = alumni['batch'].toString();
+    final matchLabel =
+        alumni['matchLabel']?.toString() ?? '';
+    final score = alumni['score'] as int? ?? 0;
 
-  return GestureDetector(
-    onTap: () => Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => AlumniPublicProfileScreen(uid: toUid),
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              AlumniPublicProfileScreen(uid: toUid),
+        ),
       ),
-    ),
-    child: Container(
-      width: 150,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.borderSubtle),
-      ),
-      child: Column(
-        children: [
-          CircleAvatar(
-            radius: 30,
-            backgroundColor: AppColors.borderSubtle,
-            child: avatarUrl.isNotEmpty
-                ? ClipOval(
-                    child: CachedNetworkImage(
-                      imageUrl: avatarUrl,
-                      fit: BoxFit.cover,
-                      width: 60,
-                      height: 60,
-                      errorWidget: (_, __, ___) => const Icon(
-                          Icons.person,
-                          color: AppColors.brandRed,
-                          size: 28),
-                    ),
-                  )
-                : Text(
-                    name.isNotEmpty ? name[0].toUpperCase() : '?',
-                    style: GoogleFonts.cormorantGaramond(
-                        fontSize: 22,
-                        color: AppColors.brandRed,
-                        fontWeight: FontWeight.w600),
-                  ),
+      child: Container(
+        width: 155,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: score >= 90
+                ? AppColors.brandRed.withOpacity(0.3)
+                : AppColors.borderSubtle,
+            width: score >= 90 ? 1.5 : 1.0,
           ),
-          const SizedBox(height: 10),
-          Text(name,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            // ─── Avatar ───
+            CircleAvatar(
+              radius: 28,
+              backgroundColor: AppColors.borderSubtle,
+              child: avatarUrl.isNotEmpty
+                  ? ClipOval(
+                      child: CachedNetworkImage(
+                        imageUrl: avatarUrl,
+                        fit: BoxFit.cover,
+                        width: 56,
+                        height: 56,
+                        errorWidget: (_, __, ___) =>
+                            const Icon(Icons.person,
+                                color: AppColors.brandRed,
+                                size: 26),
+                      ),
+                    )
+                  : Text(
+                      name.isNotEmpty
+                          ? name[0].toUpperCase()
+                          : '?',
+                      style: GoogleFonts.cormorantGaramond(
+                          fontSize: 22,
+                          color: AppColors.brandRed,
+                          fontWeight: FontWeight.w600),
+                    ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // ─── Match label badge ───
+            if (matchLabel.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: score >= 90
+                      ? AppColors.brandRed.withOpacity(0.1)
+                      : Colors.blue.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  matchLabel,
+                  style: GoogleFonts.inter(
+                      fontSize: 8,
+                      fontWeight: FontWeight.w700,
+                      color: score >= 90
+                          ? AppColors.brandRed
+                          : Colors.blue.shade700,
+                      letterSpacing: 0.2),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+
+            // ─── Name ───
+            Text(
+              name,
               style: GoogleFonts.inter(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                   color: AppColors.darkText),
               textAlign: TextAlign.center,
               maxLines: 2,
-              overflow: TextOverflow.ellipsis),
-          if (headline.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(headline,
+              overflow: TextOverflow.ellipsis,
+            ),
+
+            // ─── Headline ───
+            if (headline.isNotEmpty) ...[
+              const SizedBox(height: 3),
+              Text(
+                headline,
                 style: GoogleFonts.inter(
-                    fontSize: 10, color: AppColors.mutedText),
+                    fontSize: 10,
+                    color: AppColors.mutedText),
                 textAlign: TextAlign.center,
                 maxLines: 2,
-                overflow: TextOverflow.ellipsis),
-          ],
-          if (batch.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: AppColors.brandRed.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(4),
+                overflow: TextOverflow.ellipsis,
               ),
-              child: Text('Batch $batch',
+            ],
+
+            // ─── Batch ───
+            if (batch.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color:
+                      AppColors.brandRed.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  'Batch $batch',
                   style: GoogleFonts.inter(
-                      fontSize: 9,
+                      fontSize: 8,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.brandRed)),
+                      color: AppColors.brandRed),
+                ),
+              ),
+            ],
+
+            const Spacer(),
+
+            // ─── Live connection state ───
+            StreamBuilder<DocumentSnapshot>(
+              stream: currentUid.isNotEmpty
+                  ? FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(currentUid)
+                      .collection('connections')
+                      .doc(toUid)
+                      .snapshots()
+                  : const Stream.empty(),
+              builder: (context, connSnap) {
+                final isConnected =
+                    connSnap.data?.exists ?? false;
+
+                return StreamBuilder<DocumentSnapshot>(
+                  stream: currentUid.isNotEmpty
+                      ? FirebaseFirestore.instance
+                          .collection('friend_requests')
+                          .doc('${currentUid}_$toUid')
+                          .snapshots()
+                      : const Stream.empty(),
+                  builder: (context, reqSnap) {
+                    final isPending =
+                        reqSnap.data?.exists ?? false;
+
+                    if (isConnected) {
+                      return SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: null,
+                          icon: const Icon(
+                              Icons.check_circle,
+                              size: 12,
+                              color: Colors.green),
+                          label: Text('Connected',
+                              style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  color: Colors.green,
+                                  fontWeight:
+                                      FontWeight.w700)),
+                          style:
+                              OutlinedButton.styleFrom(
+                            side: const BorderSide(
+                                color: Colors.green),
+                            padding:
+                                const EdgeInsets.symmetric(
+                                    vertical: 5),
+                            minimumSize: Size.zero,
+                            shape:
+                                RoundedRectangleBorder(
+                                    borderRadius:
+                                        BorderRadius
+                                            .circular(8)),
+                          ),
+                        ),
+                      );
+                    }
+
+                    if (isPending) {
+                      return SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: null,
+                          style:
+                              OutlinedButton.styleFrom(
+                            foregroundColor:
+                                AppColors.mutedText,
+                            side: const BorderSide(
+                                color: AppColors
+                                    .borderSubtle),
+                            padding:
+                                const EdgeInsets.symmetric(
+                                    vertical: 5),
+                            minimumSize: Size.zero,
+                            shape:
+                                RoundedRectangleBorder(
+                                    borderRadius:
+                                        BorderRadius
+                                            .circular(8)),
+                          ),
+                          child: Text('Pending',
+                              style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  fontWeight:
+                                      FontWeight.w600)),
+                        ),
+                      );
+                    }
+
+                    return Column(children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () =>
+                              _sendConnectionRequest(
+                                  toUid, name),
+                          style:
+                              ElevatedButton.styleFrom(
+                            backgroundColor:
+                                AppColors.brandRed,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding:
+                                const EdgeInsets.symmetric(
+                                    vertical: 5),
+                            minimumSize: Size.zero,
+                            tapTargetSize:
+                                MaterialTapTargetSize
+                                    .shrinkWrap,
+                            shape:
+                                RoundedRectangleBorder(
+                                    borderRadius:
+                                        BorderRadius
+                                            .circular(8)),
+                          ),
+                          child: Text('Connect',
+                              style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  fontWeight:
+                                      FontWeight.w700)),
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: () =>
+                              _followAlumni(toUid, name),
+                          style:
+                              OutlinedButton.styleFrom(
+                            foregroundColor:
+                                AppColors.mutedText,
+                            side: const BorderSide(
+                                color: AppColors
+                                    .borderSubtle),
+                            padding:
+                                const EdgeInsets.symmetric(
+                                    vertical: 5),
+                            minimumSize: Size.zero,
+                            tapTargetSize:
+                                MaterialTapTargetSize
+                                    .shrinkWrap,
+                            shape:
+                                RoundedRectangleBorder(
+                                    borderRadius:
+                                        BorderRadius
+                                            .circular(8)),
+                          ),
+                          child: Text('Follow',
+                              style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  fontWeight:
+                                      FontWeight.w600)),
+                        ),
+                      ),
+                    ]);
+                  },
+                );
+              },
             ),
           ],
-          const Spacer(),
-
-          // ─── Live connection state ───
-          StreamBuilder<DocumentSnapshot>(
-            stream: currentUid.isNotEmpty
-                ? FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(currentUid)
-                    .collection('connections')
-                    .doc(toUid)
-                    .snapshots()
-                : const Stream.empty(),
-            builder: (context, connSnap) {
-              final isConnected =
-                  connSnap.data?.exists ?? false;
-
-              return StreamBuilder<DocumentSnapshot>(
-                stream: currentUid.isNotEmpty
-                    ? FirebaseFirestore.instance
-                        .collection('friend_requests')
-                        .doc('${currentUid}_$toUid')
-                        .snapshots()
-                    : const Stream.empty(),
-                builder: (context, reqSnap) {
-                  final isPending =
-                      reqSnap.data?.exists ?? false;
-
-                  if (isConnected) {
-                    return SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: null,
-                        icon: const Icon(
-                            Icons.check_circle,
-                            size: 13,
-                            color: Colors.green),
-                        label: Text('Connected',
-                            style: GoogleFonts.inter(
-                                fontSize: 11,
-                                color: Colors.green,
-                                fontWeight:
-                                    FontWeight.w700)),
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(
-                              color: Colors.green),
-                          padding:
-                              const EdgeInsets.symmetric(
-                                  vertical: 6),
-                          minimumSize: Size.zero,
-                          shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(
-                                      8)),
-                        ),
-                      ),
-                    );
-                  }
-
-                  if (isPending) {
-                    return SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed: null,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor:
-                              AppColors.mutedText,
-                          side: const BorderSide(
-                              color:
-                                  AppColors.borderSubtle),
-                          padding:
-                              const EdgeInsets.symmetric(
-                                  vertical: 6),
-                          minimumSize: Size.zero,
-                          shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(
-                                      8)),
-                        ),
-                        child: Text('Pending',
-                            style: GoogleFonts.inter(
-                                fontSize: 11,
-                                fontWeight:
-                                    FontWeight.w600)),
-                      ),
-                    );
-                  }
-
-                  return Column(children: [
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () =>
-                            _sendConnectionRequest(
-                                toUid, name),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              AppColors.brandRed,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          padding:
-                              const EdgeInsets.symmetric(
-                                  vertical: 6),
-                          minimumSize: Size.zero,
-                          tapTargetSize:
-                              MaterialTapTargetSize
-                                  .shrinkWrap,
-                          shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(
-                                      8)),
-                        ),
-                        child: Text('Connect',
-                            style: GoogleFonts.inter(
-                                fontSize: 11,
-                                fontWeight:
-                                    FontWeight.w700)),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed: () =>
-                            _followAlumni(toUid, name),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor:
-                              AppColors.mutedText,
-                          side: const BorderSide(
-                              color:
-                                  AppColors.borderSubtle),
-                          padding:
-                              const EdgeInsets.symmetric(
-                                  vertical: 6),
-                          minimumSize: Size.zero,
-                          tapTargetSize:
-                              MaterialTapTargetSize
-                                  .shrinkWrap,
-                          shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(
-                                      8)),
-                        ),
-                        child: Text('Follow',
-                            style: GoogleFonts.inter(
-                                fontSize: 11,
-                                fontWeight:
-                                    FontWeight.w600)),
-                      ),
-                    ),
-                  ]);
-                },
-              );
-            },
-          ),
-        ],
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   // ══════════════════════════════════════════════
   //  DRAWER
@@ -1716,11 +2183,10 @@ Future<void> _loadRandomAlumni(String currentUid) async {
               CircleAvatar(
                 radius: 28,
                 backgroundColor: AppColors.borderSubtle,
-                backgroundImage:
-                    userPhotoUrl != null &&
-                            userPhotoUrl!.isNotEmpty
-                        ? NetworkImage(userPhotoUrl!)
-                        : null,
+                backgroundImage: userPhotoUrl != null &&
+                        userPhotoUrl!.isNotEmpty
+                    ? NetworkImage(userPhotoUrl!)
+                    : null,
                 child: userPhotoUrl == null ||
                         userPhotoUrl!.isEmpty
                     ? Text(
@@ -1773,7 +2239,6 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                         ),
                       ),
                       const SizedBox(width: 6),
-                      // ─── Verification dot ───
                       Container(
                         width: 8,
                         height: 8,
@@ -1800,8 +2265,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                                 : isRejected
                                     ? Colors.red
                                     : Colors.orange,
-                            fontWeight:
-                                FontWeight.w600),
+                            fontWeight: FontWeight.w600),
                       ),
                     ]),
                   ],
@@ -1856,8 +2320,9 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                                 ''),
                     builder: (_, snap) {
                       final count = snap.data ?? 0;
-                      if (count == 0)
+                      if (count == 0) {
                         return const SizedBox();
+                      }
                       return Container(
                         padding:
                             const EdgeInsets.symmetric(
@@ -1869,9 +2334,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                               BorderRadius.circular(10),
                         ),
                         child: Text(
-                          count > 99
-                              ? '99+'
-                              : '$count',
+                          count > 99 ? '99+' : '$count',
                           style: const TextStyle(
                               color: Colors.white,
                               fontSize: 10,
@@ -1901,8 +2364,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
                   _drawerTile(Icons.work_outline,
                       'Job Board Management',
                       route: '/job_board_management'),
-                  _drawerTile(
-                      Icons.bar_chart_outlined,
+                  _drawerTile(Icons.bar_chart_outlined,
                       'Growth Metrics',
                       route: '/growth_metrics'),
                   _drawerTile(
@@ -1921,9 +2383,9 @@ Future<void> _loadRandomAlumni(String currentUid) async {
               ],
             ),
           ),
-          const Divider(color: Color(0xFFE5E7EB), height: 1),
-          _drawerTile(Icons.settings_outlined,
-              'Settings',
+          const Divider(
+              color: Color(0xFFE5E7EB), height: 1),
+          _drawerTile(Icons.settings_outlined, 'Settings',
               route: '/settings'),
           _drawerTile(Icons.logout, 'Logout',
               isDestructive: true, onTap: _logout),
@@ -1962,15 +2424,13 @@ Future<void> _loadRandomAlumni(String currentUid) async {
         ),
         child: Icon(icon,
             size: 18,
-            color: color
-                .withOpacity(active ? 1.0 : 0.7)),
+            color: color.withOpacity(active ? 1.0 : 0.7)),
       ),
       title: Text(title,
           style: GoogleFonts.inter(
             fontSize: 13,
-            fontWeight: active
-                ? FontWeight.w700
-                : FontWeight.w500,
+            fontWeight:
+                active ? FontWeight.w700 : FontWeight.w500,
             color: color,
           )),
       trailing: trailing,
@@ -2032,8 +2492,8 @@ Future<void> _loadRandomAlumni(String currentUid) async {
               height: 54,
               decoration: BoxDecoration(
                 color: Colors.white,
-                border: Border.all(
-                    color: AppColors.borderSubtle),
+                border:
+                    Border.all(color: AppColors.borderSubtle),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Icon(icon,
@@ -2073,8 +2533,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
     return Column(children: [
       Text('$value',
           style: GoogleFonts.cormorantGaramond(
-              fontSize: 28,
-              fontWeight: FontWeight.w600)),
+              fontSize: 28, fontWeight: FontWeight.w600)),
       Text(label.toUpperCase(),
           style: GoogleFonts.inter(
             fontSize: 9,
@@ -2088,8 +2547,7 @@ Future<void> _loadRandomAlumni(String currentUid) async {
   Widget _sectionHeader(String title, String action,
       {VoidCallback? onTap}) {
     return Row(
-      mainAxisAlignment:
-          MainAxisAlignment.spaceBetween,
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Text(title,
@@ -2113,72 +2571,10 @@ Future<void> _loadRandomAlumni(String currentUid) async {
     );
   }
 
-  Widget _opportunityCard(
-      Map<String, dynamic> op) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: AppColors.borderSubtle),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment:
-                MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                (op['type'] ?? '').toUpperCase(),
-                style: GoogleFonts.inter(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.brandRed,
-                    letterSpacing: 1),
-              ),
-              Text(op['location'] ?? '',
-                  style: GoogleFonts.inter(
-                      fontSize: 11,
-                      color: AppColors.mutedText)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(op['title'] ?? '',
-              style: GoogleFonts.inter(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          Text(op['company'] ?? '',
-              style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: AppColors.mutedText)),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Text('APPLY NOW',
-                  style: GoogleFonts.inter(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1,
-                      color: AppColors.brandRed)),
-              const SizedBox(width: 6),
-              const Icon(Icons.arrow_forward_rounded,
-                  size: 14, color: AppColors.brandRed),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildEmptyState(String message) {
     return Center(
       child: Padding(
-        padding:
-            const EdgeInsets.symmetric(vertical: 20),
+        padding: const EdgeInsets.symmetric(vertical: 20),
         child: Text(message,
             style: GoogleFonts.inter(
                 color: AppColors.mutedText,
@@ -2208,14 +2604,14 @@ class _FriendRequestsBanner extends StatelessWidget {
           .doc(currentUid)
           .collection('connections')
           .doc(fromUid)
-          .set({'connectedAt': now});
+          .set({'connectedAt': now, 'uid': fromUid});
 
       await FirebaseFirestore.instance
           .collection('users')
           .doc(fromUid)
           .collection('connections')
           .doc(currentUid)
-          .set({'connectedAt': now});
+          .set({'connectedAt': now, 'uid': currentUid});
 
       await FirebaseFirestore.instance
           .collection('friend_requests')
@@ -2236,11 +2632,11 @@ class _FriendRequestsBanner extends StatelessWidget {
               {'connectionsCount': FieldValue.increment(1)},
               SetOptions(merge: true));
 
-      final currentUserDoc =
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(currentUid)
-              .get();
+      final currentUserDoc = await FirebaseFirestore
+          .instance
+          .collection('users')
+          .doc(currentUid)
+          .get();
       final acceptorName =
           currentUserDoc.data()?['name']?.toString() ??
               'Someone';
@@ -2270,8 +2666,8 @@ class _FriendRequestsBanner extends StatelessWidget {
     }
   }
 
-  Future<void> _decline(BuildContext context,
-      String requestId) async {
+  Future<void> _decline(
+      BuildContext context, String requestId) async {
     try {
       await FirebaseFirestore.instance
           .collection('friend_requests')
@@ -2305,13 +2701,11 @@ class _FriendRequestsBanner extends StatelessWidget {
         final requests = snapshot.data!.docs;
 
         return Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
               Text('Friend Requests',
-                  style:
-                      GoogleFonts.cormorantGaramond(
+                  style: GoogleFonts.cormorantGaramond(
                     fontSize: 24,
                     fontWeight: FontWeight.w500,
                     fontStyle: FontStyle.italic,
@@ -2322,8 +2716,7 @@ class _FriendRequestsBanner extends StatelessWidget {
                     horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: AppColors.brandRed,
-                  borderRadius:
-                      BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
                   '${requests.length}',
@@ -2357,13 +2750,11 @@ class _FriendRequestsBanner extends StatelessWidget {
                     );
                   }
 
-                  final user =
-                      userSnap.data!.data()
-                              as Map<String, dynamic>? ??
-                          {};
+                  final user = userSnap.data!.data()
+                          as Map<String, dynamic>? ??
+                      {};
                   final name =
-                      user['name']?.toString() ??
-                          'Unknown';
+                      user['name']?.toString() ?? 'Unknown';
                   final avatarUrl =
                       user['profilePictureUrl']
                               ?.toString() ??
@@ -2374,37 +2765,42 @@ class _FriendRequestsBanner extends StatelessWidget {
                                   .isNotEmpty ==
                               true
                           ? user['headline'].toString()
-                          : user['role']
-                                  ?.toString() ??
-                              '';
+                          : user['role']?.toString() ?? '';
 
                   return Container(
-                    margin: const EdgeInsets.only(
-                        bottom: 12),
+                    margin:
+                        const EdgeInsets.only(bottom: 12),
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius:
                           BorderRadius.circular(12),
                       border: Border.all(
-                          color:
-                              AppColors.borderSubtle),
+                          color: AppColors.borderSubtle),
                     ),
                     child: Row(children: [
-                      CircleAvatar(
-                        radius: 24,
-                        backgroundColor:
-                            AppColors.borderSubtle,
-                        backgroundImage:
-                            avatarUrl.isNotEmpty
-                                ? NetworkImage(
-                                    avatarUrl)
-                                : null,
-                        child: avatarUrl.isEmpty
-                            ? const Icon(Icons.person,
-                                color:
-                                    AppColors.brandRed)
-                            : null,
+                      GestureDetector(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                AlumniPublicProfileScreen(
+                                    uid: fromUid),
+                          ),
+                        ),
+                        child: CircleAvatar(
+                          radius: 24,
+                          backgroundColor:
+                              AppColors.borderSubtle,
+                          backgroundImage:
+                              avatarUrl.isNotEmpty
+                                  ? NetworkImage(avatarUrl)
+                                  : null,
+                          child: avatarUrl.isEmpty
+                              ? const Icon(Icons.person,
+                                  color: AppColors.brandRed)
+                              : null,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -2419,24 +2815,20 @@ class _FriendRequestsBanner extends StatelessWidget {
                                         FontWeight.w700)),
                             if (headline.isNotEmpty)
                               Text(headline,
-                                  style:
-                                      GoogleFonts.inter(
-                                          fontSize: 12,
-                                          color: AppColors
-                                              .mutedText),
+                                  style: GoogleFonts.inter(
+                                      fontSize: 12,
+                                      color:
+                                          AppColors.mutedText),
                                   maxLines: 1,
                                   overflow:
-                                      TextOverflow
-                                          .ellipsis),
+                                      TextOverflow.ellipsis),
                           ],
                         ),
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton(
                         onPressed: () => _accept(
-                            context,
-                            fromUid,
-                            requestId),
+                            context, fromUid, requestId),
                         style: ElevatedButton.styleFrom(
                           backgroundColor:
                               AppColors.brandRed,
@@ -2451,8 +2843,7 @@ class _FriendRequestsBanner extends StatelessWidget {
                                   .shrinkWrap,
                           shape: RoundedRectangleBorder(
                               borderRadius:
-                                  BorderRadius.circular(
-                                      8)),
+                                  BorderRadius.circular(8)),
                         ),
                         child: Text('Accept',
                             style: GoogleFonts.inter(
@@ -2462,14 +2853,13 @@ class _FriendRequestsBanner extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       OutlinedButton(
-                        onPressed: () => _decline(
-                            context, requestId),
+                        onPressed: () =>
+                            _decline(context, requestId),
                         style: OutlinedButton.styleFrom(
                           foregroundColor:
                               AppColors.mutedText,
                           side: const BorderSide(
-                              color:
-                                  AppColors.borderSubtle),
+                              color: AppColors.borderSubtle),
                           padding:
                               const EdgeInsets.symmetric(
                                   horizontal: 12,
@@ -2480,8 +2870,7 @@ class _FriendRequestsBanner extends StatelessWidget {
                                   .shrinkWrap,
                           shape: RoundedRectangleBorder(
                               borderRadius:
-                                  BorderRadius.circular(
-                                      8)),
+                                  BorderRadius.circular(8)),
                         ),
                         child: Text('Decline',
                             style: GoogleFonts.inter(
