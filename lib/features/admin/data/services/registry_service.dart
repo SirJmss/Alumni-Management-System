@@ -2,22 +2,27 @@
 // RegistryService
 // FILE: lib/features/admin/data/services/registry_service.dart
 //
-// CHANGES:
-//  1. All scoring now delegates to RegistryMatcher.scoreOne() and
-//     RegistryMatcher.findBestMatch() — no duplicate scoring logic here.
+// ROOT-CAUSE FIX (the "auto-verified never triggers" bug):
 //
-//  2. _checkByStudentId and _checkByNameAndBatch are simplified: they now
-//     just fetch the right Firestore candidates and hand them to
-//     RegistryMatcher.findBestMatch(). This eliminates the old _score()
-//     method entirely.
+//   The old queries used:
+//     .where('isMatched', isEqualTo: false)
 //
-//  3. uploadRecords() auto-match loop now uses RegistryMatcher.findBestMatch()
-//     for consistency — previously it called checkUser() which had its own
-//     path through the old _score() method.
+//   Firestore only returns documents where the field EXISTS AND equals the
+//   value. Documents that were manually created in the Firebase Console, or
+//   uploaded before the isMatched field was introduced, simply don't have that
+//   field — so they are silently excluded from every query, meaning the
+//   matcher never sees the candidate and always returns isMatch=false.
 //
-//  4. After a successful registration, register() in RegisterScreen must now
-//     also write a /student_id_map/{studentId} doc if studentId is non-empty.
-//     That write is documented here but lives in register_screen.dart.
+//   FIX: Removed the isMatched filter from all queries. Instead:
+//     1. We fetch candidates by studentId or batch (cheap, narrow queries).
+//     2. We pass them to RegistryMatcher which scores them.
+//     3. After a successful match we mark isMatched=true to prevent
+//        the same record from being matched again.
+//     4. If the query returns a doc that is already matched (isMatched==true),
+//        we skip it in the candidate list.
+//
+//   This is both more robust and more correct than relying on a boolean field
+//   that may not exist on older documents.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -39,8 +44,9 @@ class RegistryService {
     required String email,
     String studentId = '',
   }) async {
-    // ── Fast path: if a studentId is provided, try an exact-ID lookup first ──
-    // This narrows the candidate pool significantly and is deterministic.
+    // ── Fast path: exact Student ID lookup ──────────────────────────────────
+    // If a studentId is provided, try it first. This is the most reliable
+    // signal and narrows the candidate pool to 1–5 docs.
     if (studentId.trim().isNotEmpty) {
       final idResult = await _checkByStudentId(
         studentId: studentId.trim(),
@@ -49,16 +55,13 @@ class RegistryService {
         course: course,
         email: email,
       );
-      // Only short-circuit if we actually found a confident match.
-      // If the ID is in the registry but the name is completely wrong
-      // (score < threshold), fall through to the name+batch path.
       if (idResult != null &&
           idResult.confidence >= RegistryMatcher.matchThreshold) {
         return idResult;
       }
     }
 
-    // ── Full scan narrowed by batch year ──
+    // ── Full scan narrowed by batch year ────────────────────────────────────
     return _checkByNameAndBatch(
       fullName: fullName,
       batch: batch,
@@ -69,7 +72,10 @@ class RegistryService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Fetch records matching the given studentId, then score with RegistryMatcher
+  // _checkByStudentId
+  //
+  // FIX: Query only by studentId — NO isMatched filter.
+  // Filter already-matched docs client-side after fetching.
   // ─────────────────────────────────────────────────────────────────────────
   Future<MatchResult?> _checkByStudentId({
     required String studentId,
@@ -82,18 +88,25 @@ class RegistryService {
       final snap = await _db
           .collection('alumni_registry')
           .where('studentId', isEqualTo: studentId)
-          .where('isMatched', isEqualTo: false)
-          .limit(5)  // there should only ever be 1, but guard against dupes
+          .limit(10)
           .get();
 
       if (snap.docs.isEmpty) return null;
 
+      // FIX: Filter already-matched records CLIENT-SIDE.
+      // This handles docs where isMatched field is missing (null/absent).
       final candidates = snap.docs
+          .where((d) {
+            final isMatched = d.data()['isMatched'];
+            // Include if isMatched is false, null, or absent
+            return isMatched != true;
+          })
           .map((d) => AlumniRecord.fromMap(d.id, d.data()))
           .toList();
 
-      // Use RegistryMatcher as the single scorer
-      final result = RegistryMatcher.findBestMatch(
+      if (candidates.isEmpty) return null;
+
+      return RegistryMatcher.findBestMatch(
         fullName: fullName,
         batch: batch,
         course: course,
@@ -101,15 +114,16 @@ class RegistryService {
         studentId: studentId,
         registry: candidates,
       );
-
-      return result;
     } catch (e) {
       return null;
     }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Fetch all unmatched records for the given batch, then score
+  // _checkByNameAndBatch
+  //
+  // FIX: Query only by batch — NO isMatched filter.
+  // Filter already-matched docs client-side after fetching.
   // ─────────────────────────────────────────────────────────────────────────
   Future<MatchResult> _checkByNameAndBatch({
     required String fullName,
@@ -121,35 +135,39 @@ class RegistryService {
     QuerySnapshot<Map<String, dynamic>> snap;
     try {
       if (batch.isNotEmpty) {
-        // Narrow by batch first — O(batch_size) instead of O(registry_size)
+        // Narrow by batch — removes ~95% of registry from consideration
         snap = await _db
             .collection('alumni_registry')
             .where('batch', isEqualTo: batch)
-            .where('isMatched', isEqualTo: false)
             .get();
       } else {
-        // No batch — scan up to 500 unmatched records
+        // No batch provided — scan up to 500 records
         snap = await _db
             .collection('alumni_registry')
-            .where('isMatched', isEqualTo: false)
             .limit(500)
             .get();
       }
     } catch (_) {
-      return const MatchResult(
-          isMatch: false, confidence: 0, record: null);
+      return const MatchResult(isMatch: false, confidence: 0, record: null);
     }
 
     if (snap.docs.isEmpty) {
-      return const MatchResult(
-          isMatch: false, confidence: 0, record: null);
+      return const MatchResult(isMatch: false, confidence: 0, record: null);
     }
 
+    // FIX: Filter already-matched records CLIENT-SIDE
     final candidates = snap.docs
+        .where((d) {
+          final isMatched = d.data()['isMatched'];
+          return isMatched != true;
+        })
         .map((d) => AlumniRecord.fromMap(d.id, d.data()))
         .toList();
 
-    // Delegate entirely to RegistryMatcher
+    if (candidates.isEmpty) {
+      return const MatchResult(isMatch: false, confidence: 0, record: null);
+    }
+
     return RegistryMatcher.findBestMatch(
       fullName: fullName,
       batch: batch,
@@ -171,8 +189,7 @@ class RegistryService {
   }) async {
     final batchId = _db.collection('registry_uploads').doc().id;
 
-    final uploadRef =
-        _db.collection('registry_uploads').doc(batchId);
+    final uploadRef = _db.collection('registry_uploads').doc(batchId);
     await uploadRef.set({
       'fileName': fileName,
       'totalRecords': records.length,
@@ -195,17 +212,17 @@ class RegistryService {
       for (final record in chunk) {
         final docRef = _db.collection('alumni_registry').doc();
         wb.set(docRef, {
-          'firstName':   record.firstName,
-          'lastName':    record.lastName,
-          'fullName':    record.fullName,
-          'batch':       record.batch,
-          'course':      record.course,
-          'email':       record.email,
-          'studentId':   record.studentId,
+          'firstName':     record.firstName,
+          'lastName':      record.lastName,
+          'fullName':      record.fullName,
+          'batch':         record.batch,
+          'course':        record.course,
+          'email':         record.email,
+          'studentId':     record.studentId,
           'uploadBatchId': batchId,
-          'isMatched':   false,
+          'isMatched':     false,      // always write the field explicitly
           'matchedUserId': '',
-          'createdAt':   FieldValue.serverTimestamp(),
+          'createdAt':     FieldValue.serverTimestamp(),
         });
       }
       await wb.commit();
@@ -221,29 +238,28 @@ class RegistryService {
 
       for (final userDoc in pendingSnap.docs) {
         final userData = userDoc.data();
+        final userBatch = userData['batch']?.toString().trim() ?? '';
 
-        // Re-fetch fresh unmatched records for this user's batch
-        final userBatch =
-            userData['batch']?.toString().trim() ?? '';
+        // FIX: No isMatched filter in query — filter client-side
         final candidateSnap = userBatch.isNotEmpty
             ? await _db
                 .collection('alumni_registry')
                 .where('batch', isEqualTo: userBatch)
-                .where('isMatched', isEqualTo: false)
                 .get()
             : await _db
                 .collection('alumni_registry')
-                .where('isMatched', isEqualTo: false)
                 .limit(500)
                 .get();
 
         if (candidateSnap.docs.isEmpty) continue;
 
         final candidates = candidateSnap.docs
+            .where((d) => d.data()['isMatched'] != true)
             .map((d) => AlumniRecord.fromMap(d.id, d.data()))
             .toList();
 
-        // Use RegistryMatcher — consistent with all other paths
+        if (candidates.isEmpty) continue;
+
         final result = RegistryMatcher.findBestMatch(
           fullName:  userData['name']?.toString() ?? '',
           batch:     userBatch,
@@ -261,18 +277,18 @@ class RegistryService {
             _db.collection('users').doc(userDoc.id),
             {
               'verificationStatus': 'verified',
-              'status': 'active',
-              'verifiedAt':  FieldValue.serverTimestamp(),
-              'verifiedBy':  'system_auto',
-              'registryMatchId':  result.record!.id,
-              'matchConfidence':  result.confidence,
+              'status':            'active',
+              'verifiedAt':        FieldValue.serverTimestamp(),
+              'verifiedBy':        'system_auto',
+              'registryMatchId':   result.record!.id,
+              'matchConfidence':   result.confidence,
             },
           );
 
           batchWrite.update(
             _db.collection('alumni_registry').doc(result.record!.id),
             {
-              'isMatched':    true,
+              'isMatched':     true,
               'matchedUserId': userDoc.id,
             },
           );
@@ -281,23 +297,23 @@ class RegistryService {
         }
       }
     } catch (e) {
-      // Non-fatal — upload still succeeded even if auto-match fails
+      // Non-fatal — upload succeeded even if auto-match fails
     }
 
     await uploadRef.update({
       'matchedCount': matchedCount,
-      'status': 'done',
+      'status':       'done',
     });
 
     return RegistryUpload(
-      id:           batchId,
-      fileName:     fileName,
-      totalRecords: records.length,
-      matchedCount: matchedCount,
-      status:       'done',
-      uploadedBy:   uploadedByName,
-      uploadedByName: uploadedByName,
-      uploadedAt:   DateTime.now(),
+      id:              batchId,
+      fileName:        fileName,
+      totalRecords:    records.length,
+      matchedCount:    matchedCount,
+      status:          'done',
+      uploadedBy:      uploadedByName,
+      uploadedByName:  uploadedByName,
+      uploadedAt:      DateTime.now(),
     );
   }
 
@@ -319,10 +335,7 @@ class RegistryService {
       }
       await wb.commit();
     }
-    await _db
-        .collection('registry_uploads')
-        .doc(uploadId)
-        .delete();
+    await _db.collection('registry_uploads').doc(uploadId).delete();
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -335,8 +348,7 @@ class RegistryService {
         .orderBy('uploadedAt', descending: true)
         .snapshots()
         .map((snap) => snap.docs
-            .map((doc) =>
-                RegistryUpload.fromMap(doc.id, doc.data()))
+            .map((doc) => RegistryUpload.fromMap(doc.id, doc.data()))
             .toList());
   }
 
