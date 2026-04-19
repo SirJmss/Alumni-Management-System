@@ -717,11 +717,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
 
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                    sliver: SliverToBoxAdapter(child: _buildMetricsRow()),
-                  ),
-
-                  SliverPadding(
                     padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
                     sliver: SliverToBoxAdapter(
                         child: _FriendRequestsBanner(currentUid: currentUid)),
@@ -971,23 +966,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildMetricsRow() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.borderSubtle),
-      ),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        _buildStatItem(totalAlumni,    'Members'),
-        Container(width: 0.7, height: 32, color: AppColors.borderSubtle),
-        _buildStatItem(upcomingEvents, 'Events'),
-        Container(width: 0.7, height: 32, color: AppColors.borderSubtle),
-        _buildStatItem(activeCourses,  'Courses'),
-      ]),
-    );
-  }
+
 
   Widget _buildUpcomingEventsSection() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1920,19 +1899,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildStatItem(int value, String label) {
-    return Column(children: [
-      Text('$value',
-          style: GoogleFonts.cormorantGaramond(
-              fontSize: 28, fontWeight: FontWeight.w600)),
-      Text(label.toUpperCase(),
-          style: GoogleFonts.inter(
-              fontSize: 9,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.0,
-              color: AppColors.mutedText)),
-    ]);
-  }
+
 
   Widget _sectionHeader(String title, String action, {VoidCallback? onTap}) {
     return Row(

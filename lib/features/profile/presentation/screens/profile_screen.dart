@@ -106,7 +106,8 @@ class _AlumniProfileScreenState
 
   @override
   Widget build(BuildContext context) {
-    if (_uid == null || _uid.isEmpty) {
+    if (_uid == null || _uid
+    .isEmpty) {
       return Scaffold(
         backgroundColor: const Color(0xFFF4F4F6),
         body: Center(child: Column(
