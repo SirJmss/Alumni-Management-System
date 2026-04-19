@@ -625,6 +625,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     final isLoading  = isLoadingProfile || isLoadingData;
     final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isMobile = screenWidth < 768;
 
     String firstName() {
       if (userName.trim().isEmpty) return 'there';
@@ -695,54 +697,54 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
-                    sliver: SliverToBoxAdapter(child: _buildHeroSection(firstName())),
+                    padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 24, isMobile ? 16 : 20, 0),
+                    sliver: SliverToBoxAdapter(child: _buildHeroSection(firstName(), isMobile)),
                   ),
 
                   if (isPending || isRejected)
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                      padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 16, isMobile ? 16 : 20, 0),
                       sliver: SliverToBoxAdapter(child: _buildVerificationBanner()),
                     ),
 
                   if (isVerified && _profileCompletion < 80)
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                      padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 16, isMobile ? 16 : 20, 0),
                       sliver: SliverToBoxAdapter(child: _buildProfileCompletionBanner()),
                     ),
 
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                    padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 20, isMobile ? 16 : 20, 0),
                     sliver: SliverToBoxAdapter(child: _buildQuickActionsRow(currentUid)),
                   ),
 
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                    padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 24, isMobile ? 16 : 20, 0),
                     sliver: SliverToBoxAdapter(
                         child: _FriendRequestsBanner(currentUid: currentUid)),
                   ),
 
                   if (upcomingCalendar.isNotEmpty)
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                      padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 8, isMobile ? 16 : 20, 0),
                       sliver: SliverToBoxAdapter(child: _buildUpcomingEventsSection()),
                     ),
 
                   if (recentAnnouncements.isNotEmpty)
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                      padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 24, isMobile ? 16 : 20, 0),
                       sliver: SliverToBoxAdapter(child: _buildAnnouncementsSection()),
                     ),
 
                   // Dashboard: top 3 jobs + VIEW ALL
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                    padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 24, isMobile ? 16 : 20, 0),
                     sliver: SliverToBoxAdapter(child: _buildOpportunitiesSection()),
                   ),
 
                   if (nearbyAlumni.isNotEmpty)
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                      padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 24, isMobile ? 16 : 20, 0),
                       sliver: SliverToBoxAdapter(
                           child: _buildAlumniNetworkSection(currentUid)),
                     ),
@@ -761,16 +763,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   //  SECTION BUILDERS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildHeroSection(String firstName) {
+  Widget _buildHeroSection(String firstName, bool isMobile) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Welcome back,',
-            style: GoogleFonts.inter(fontSize: 13, color: AppColors.mutedText)),
+            style: GoogleFonts.inter(fontSize: isMobile ? 12 : 13, color: AppColors.mutedText)),
         const SizedBox(height: 4),
         Text(firstName,
             style: GoogleFonts.cormorantGaramond(
-                fontSize: 36, height: 1.0,
+                fontSize: isMobile ? 28 : 36, height: 1.0,
                 fontWeight: FontWeight.w600, color: AppColors.darkText)),
         const SizedBox(height: 12),
         Wrap(spacing: 8, runSpacing: 8, children: [

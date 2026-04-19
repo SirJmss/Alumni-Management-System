@@ -228,7 +228,7 @@ class _AchievementsTab extends StatelessWidget {
             const Divider(color: AppColors.borderSubtle),
             const SizedBox(height: 8),
             // AdminAchievementQueue is exported from gallery_screen.dart
-            const AdminAchievementQueue(),
+            const CareerMilestonesScreen(),
           ],
         ),
       ),
@@ -508,7 +508,6 @@ class _LandingPageState extends State<LandingPage> {
             child: Image.asset(
               'assets/images/gallery/building.jpg',
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => const SizedBox(),
             ),
           ),
         ),
@@ -1018,13 +1017,6 @@ class _LandingPageState extends State<LandingPage> {
               'assets/images/gallery/building.jpg',
               fit: BoxFit.cover,
               opacity: const AlwaysStoppedAnimation(0.4),
-              errorBuilder: (_, __, ___) => Container(
-                color: AppColors.brandRed.withOpacity(0.05),
-                child: const Center(
-                  child: Icon(Icons.school_outlined,
-                      size: 64, color: AppColors.borderSubtle),
-                ),
-              ),
             ),
           ),
           Positioned(

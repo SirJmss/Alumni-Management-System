@@ -6,7 +6,6 @@ import 'package:intl/intl.dart';
 import 'package:alumni/core/constants/app_colors.dart';
 import 'package:alumni/features/admin/presentation/screens/admin_post_approval.dart';
 import 'package:alumni/features/gallery/presentation/screens/gallery_screen.dart'
-
     show AdminAchievementQueue;
 
 class AdminDashboardWeb extends StatefulWidget {
@@ -434,7 +433,8 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
                       route: '/announcement_management'),
 
                   // ── Post Approval with live combined badge ──────
-                  _sidebarItemWithBadge(label: 'Post Approval',
+                  _sidebarItemWithBadge(
+                    label: 'Post Approval',
                     route: '/post_approval',
                     badge: const CombinedPendingBadge(),
                   ),
@@ -545,6 +545,44 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
           Text('LIVE INSTITUTIONAL OVERVIEW',
               style: GoogleFonts.inter(
                   fontSize: 10, letterSpacing: 2, color: AppColors.mutedText)),
+        ]),
+        Row(children: [
+          OutlinedButton.icon(
+            onPressed: () =>
+                _showSnackBar('Donation reports coming soon', isError: false),
+            icon: const Icon(Icons.bar_chart_outlined, size: 16),
+            label: Text('Donation Reports',
+                style: GoogleFonts.inter(
+                    fontSize: 12, fontWeight: FontWeight.w600)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.darkText,
+              side: const BorderSide(color: AppColors.borderSubtle),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          ElevatedButton.icon(
+            onPressed: _showNewsletterDialog,
+            icon: const Icon(Icons.send, size: 16),
+            label: Text('Send Newsletter',
+                style: GoogleFonts.inter(
+                    fontSize: 12, fontWeight: FontWeight.w600)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.brandRed,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          IconButton(
+            onPressed: _load,
+            icon: const Icon(Icons.refresh, color: AppColors.mutedText),
+            tooltip: 'Refresh',
+          ),
         ]),
       ],
     );
@@ -1209,8 +1247,176 @@ class _AdminDashboardWebState extends State<AdminDashboardWeb> {
     );
   }
 
+  // ══════════════════════════════════════════════════════
+  //  NEWSLETTER
+  // ══════════════════════════════════════════════════════
 
- 
+  void _showNewsletterDialog() {
+    final subjectCtrl = TextEditingController();
+    final bodyCtrl    = TextEditingController();
+    bool isSending    = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => DraggableScrollableSheet(
+          initialChildSize: 0.75,
+          maxChildSize: 0.95,
+          minChildSize: 0.4,
+          builder: (_, controller) => Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Column(children: [
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.borderSubtle,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 20, vertical: 4),
+                child: Row(children: [
+                  Text('Send Newsletter',
+                      style: GoogleFonts.cormorantGaramond(
+                          fontSize: 22, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: isSending
+                        ? null
+                        : () async {
+                            final subject = subjectCtrl.text.trim();
+                            final body    = bodyCtrl.text.trim();
+                            if (subject.isEmpty) {
+                              _showSnackBar('Subject is required', isError: true);
+                              return;
+                            }
+                            if (body.isEmpty) {
+                              _showSnackBar('Message body is required', isError: true);
+                              return;
+                            }
+                            setSheet(() => isSending = true);
+                            try {
+                              await FirebaseFirestore.instance
+                                  .collection('newsletters')
+                                  .add({
+                                'subject'       : subject,
+                                'body'          : body,
+                                'sentBy'        : FirebaseAuth.instance.currentUser?.uid,
+                                'sentByName'    : _adminName,
+                                'sentAt'        : FieldValue.serverTimestamp(),
+                                'recipientCount': _totalAlumni,
+                                'status'        : 'queued',
+                              });
+                              if (ctx.mounted) {
+                                Navigator.pop(ctx);
+                                _showSnackBar(
+                                    'Newsletter queued for delivery to $_totalAlumni alumni',
+                                    isError: false);
+                              }
+                            } catch (e) {
+                              setSheet(() => isSending = false);
+                              _showSnackBar('Error: $e', isError: true);
+                            }
+                          },
+                    child: Text(
+                      isSending ? 'Queuing…' : 'Send',
+                      style: GoogleFonts.inter(
+                          color: AppColors.brandRed,
+                          fontWeight: FontWeight.w700, fontSize: 15),
+                    ),
+                  ),
+                ]),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView(
+                  controller: controller,
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: Colors.blue.withOpacity(0.2)),
+                      ),
+                      child: Row(children: [
+                        const Icon(Icons.info_outline,
+                            color: Colors.blue, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Queued for delivery to $_totalAlumni verified alumni via Cloud Function.',
+                            style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: Colors.blue.shade700),
+                          ),
+                        ),
+                      ]),
+                    ),
+                    const SizedBox(height: 16),
+                    _inputField(subjectCtrl, 'Subject',
+                        'e.g. Alumni Homecoming 2026 Announcement'),
+                    const SizedBox(height: 16),
+                    _inputField(bodyCtrl, 'Message',
+                        'Write your newsletter content here…',
+                        maxLines: 10),
+                    const SizedBox(height: 32),
+                  ],
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  SHARED WIDGETS
+  // ══════════════════════════════════════════════════════
+
+  Widget _inputField(TextEditingController ctrl,
+      String label, String hint,
+      {int maxLines = 1}) {
+    return TextFormField(
+      controller: ctrl,
+      maxLines: maxLines,
+      style: GoogleFonts.inter(fontSize: 14),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        labelStyle: GoogleFonts.inter(
+            color: AppColors.brandRed, fontWeight: FontWeight.w500),
+        hintStyle: GoogleFonts.inter(
+            color: AppColors.mutedText, fontSize: 13),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.borderSubtle),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.borderSubtle),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.brandRed, width: 1.5),
+        ),
+        filled: true,
+        fillColor: AppColors.softWhite,
+        contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16, vertical: 14),
+      ),
+    );
+  }
 
   Widget _statCard(IconData icon, String label,
       String value, String sub, Color color) {
