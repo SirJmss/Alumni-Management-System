@@ -65,9 +65,7 @@ class MyApp extends StatelessWidget {
         '/job_board_management'         : (context) => const JobBoardManagementScreen(),
         '/career_milestones'            : (context) => const CareerMilestonesScreen(),
         '/announcement_management'      : (context) => const AnnouncementManagementScreen(),
-        // ── Post Approval standalone screen ──────────────────────────────
         '/post_approval'                : (context) => const PostApprovalScreen(),
-        // ─────────────────────────────────────────────────────────────────
         '/discussions'                  : (context) => const DiscussionsScreen(),
         '/events'                       : (context) => const EventListScreen(),
         '/announcements'                : (context) => const AnnouncementsScreen(),
@@ -83,8 +81,6 @@ class MyApp extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST APPROVAL STANDALONE SCREEN
-// Wraps PostApprovalPanel + AdminAchievementQueue in a full Scaffold so
-// the sidebar "/post_approval" route has a real destination.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class PostApprovalScreen extends StatefulWidget {
@@ -95,7 +91,6 @@ class PostApprovalScreen extends StatefulWidget {
 }
 
 class _PostApprovalScreenState extends State<PostApprovalScreen> {
-  // 0 = Feed Posts, 1 = Gallery Achievements
   int _tab = 0;
 
   @override
@@ -176,7 +171,6 @@ class _PostApprovalScreenState extends State<PostApprovalScreen> {
   }
 }
 
-// ── Feed posts tab ────────────────────────────────────────────────────────────
 class _FeedPostsTab extends StatelessWidget {
   const _FeedPostsTab({super.key});
 
@@ -197,7 +191,6 @@ class _FeedPostsTab extends StatelessWidget {
   }
 }
 
-// ── Achievement posts tab ─────────────────────────────────────────────────────
 class _AchievementsTab extends StatelessWidget {
   const _AchievementsTab({super.key});
 
@@ -227,7 +220,6 @@ class _AchievementsTab extends StatelessWidget {
             const SizedBox(height: 16),
             const Divider(color: AppColors.borderSubtle),
             const SizedBox(height: 8),
-            // AdminAchievementQueue is exported from gallery_screen.dart
             const CareerMilestonesScreen(),
           ],
         ),
@@ -237,7 +229,27 @@ class _AchievementsTab extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LANDING PAGE  (unchanged from your original)
+// CORNER ACCENT PAINTER — decorative L-bracket
+// ─────────────────────────────────────────────────────────────────────────────
+class _CornerAccentPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = AppColors.brandRed.withOpacity(0.5)
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+    // Top horizontal
+    canvas.drawLine(Offset.zero, Offset(size.width, 0), paint);
+    // Left vertical
+    canvas.drawLine(Offset.zero, Offset(0, size.height), paint);
+  }
+
+  @override
+  bool shouldRepaint(_CornerAccentPainter old) => false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LANDING PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
 class LandingPage extends StatefulWidget {
@@ -495,6 +507,7 @@ class _LandingPageState extends State<LandingPage> {
         ),
       );
 
+  // ── HERO — line removed, design enhanced ────────────────────────────────
   Widget _buildHero(bool isMobile) {
     return Container(
       width: double.infinity,
@@ -502,69 +515,203 @@ class _LandingPageState extends State<LandingPage> {
           BoxConstraints(minHeight: MediaQuery.of(context).size.height),
       color: const Color(0xFF0C0C0C),
       child: Stack(children: [
+
+        // Background image — slightly more visible
         Positioned.fill(
-          child: Opacity(
-            opacity: 0.03,
-            child: Image.asset(
-              'assets/images/gallery/building.jpg',
-              fit: BoxFit.cover,
+          child: Image.asset(
+            'assets/images/gallery/building.jpg',
+            fit: BoxFit.cover,
+            opacity: const AlwaysStoppedAnimation(0.10),
+          ),
+        ),
+
+        // Radial warm glow top-left
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: const Alignment(-0.7, -0.4),
+                radius: 1.2,
+                colors: [
+                  AppColors.brandRed.withOpacity(0.09),
+                  Colors.transparent,
+                ],
+              ),
             ),
           ),
         ),
+
+        // Bottom fade to black
         Positioned(
-          left: isMobile ? 24 : 80,
-          top: 0, bottom: 0,
-          child: Container(
-              width: 1,
-              color: AppColors.brandRed.withOpacity(0.3)),
+          bottom: 0, left: 0, right: 0,
+          height: 180,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.transparent, const Color(0xFF0C0C0C)],
+              ),
+            ),
+          ),
         ),
+
+        // Decorative corner bracket — top-left (replaces the full-height line)
+        Positioned(
+          top: isMobile ? 86 : 70,
+          left: isMobile ? 20 : 44,
+          child: SizedBox(
+            width: 44, height: 44,
+            child: CustomPaint(painter: _CornerAccentPainter()),
+          ),
+        ),
+
+        // Subtle bottom-right accent dot cluster
+        if (!isMobile)
+          Positioned(
+            bottom: 80, right: 80,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(3, (row) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(3, (col) => Container(
+                    width: 3, height: 3,
+                    margin: const EdgeInsets.only(left: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.06),
+                      shape: BoxShape.circle,
+                    ),
+                  )),
+                ),
+              )),
+            ),
+          ),
+
+        // Rotated year stamp — right side
+        if (!isMobile)
+          Positioned(
+            right: 44, top: 240,
+            child: RotatedBox(
+              quarterTurns: 1,
+              child: Text('ALUMNI  ·  ST. CECILIA\'S  ·  2026',
+                  style: GoogleFonts.inter(
+                      fontSize: 9, letterSpacing: 4,
+                      color: Colors.white.withOpacity(0.09),
+                      fontWeight: FontWeight.w500)),
+            ),
+          ),
+
+        // Main content
         Padding(
           padding: EdgeInsets.only(
-            left: isMobile ? 36 : 120,
-            right: isMobile ? 24 : 80,
-            top: isMobile ? 140 : 160,
-            bottom: isMobile ? 80 : 120,
+            left: isMobile ? 28 : 80,
+            right: isMobile ? 28 : 80,
+            top: isMobile ? 148 : 168,
+            bottom: isMobile ? 80 : 100,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+
+              // Tag pill with live dot
               Container(
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 6),
+                    horizontal: 14, vertical: 7),
                 decoration: BoxDecoration(
+                  color: AppColors.brandRed.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(2),
                   border: Border.all(
-                      color: AppColors.brandRed.withOpacity(0.5),
+                      color: AppColors.brandRed.withOpacity(0.35),
                       width: 0.5),
                 ),
-                child: Text('EST. 2026  ·  ST. CECILIA\'S',
-                    style: GoogleFonts.inter(
-                        fontSize: 10, letterSpacing: 3,
-                        color: AppColors.brandRed,
-                        fontWeight: FontWeight.w600)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Container(
+                    width: 5, height: 5,
+                    decoration: const BoxDecoration(
+                        color: AppColors.brandRed, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('EST. 2026  ·  ST. CECILIA\'S',
+                      style: GoogleFonts.inter(
+                          fontSize: 10, letterSpacing: 2.5,
+                          color: AppColors.brandRed,
+                          fontWeight: FontWeight.w600)),
+                ]),
               ),
-              const SizedBox(height: 40),
-              Text('Where\nLegacy\nLives On.',
-                  style: GoogleFonts.cormorantGaramond(
-                      fontSize: isMobile ? 64 : 96,
-                      height: 1.0,
-                      fontWeight: FontWeight.w300,
-                      color: Colors.white,
-                      letterSpacing: -1)),
-              const SizedBox(height: 32),
-              SizedBox(
-                width: isMobile ? double.infinity : 480,
-                child: Text(
-                  'A private network for St. Cecilia\'s graduates. Connect with fellow alumni, attend exclusive events, and carry your legacy forward.',
-                  style: GoogleFonts.inter(
-                      fontSize: isMobile ? 15 : 17,
-                      color: Colors.white.withOpacity(0.55),
-                      height: 1.7,
-                      fontWeight: FontWeight.w300),
-                ),
+
+              const SizedBox(height: 44),
+
+              // Headline with mixed weight for typographic rhythm
+              RichText(
+                text: TextSpan(children: [
+                  TextSpan(
+                    text: 'Where\n',
+                    style: GoogleFonts.cormorantGaramond(
+                        fontSize: isMobile ? 66 : 100,
+                        height: 0.96,
+                        fontWeight: FontWeight.w300,
+                        color: Colors.white,
+                        letterSpacing: -1),
+                  ),
+                  TextSpan(
+                    text: 'Legacy\n',
+                    style: GoogleFonts.cormorantGaramond(
+                        fontSize: isMobile ? 66 : 100,
+                        height: 0.96,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                        fontStyle: FontStyle.italic,
+                        letterSpacing: -1),
+                  ),
+                  TextSpan(
+                    text: 'Lives On.',
+                    style: GoogleFonts.cormorantGaramond(
+                        fontSize: isMobile ? 66 : 100,
+                        height: 1.08,
+                        fontWeight: FontWeight.w300,
+                        color: Colors.white,
+                        letterSpacing: -1),
+                  ),
+                ]),
               ),
+
+              const SizedBox(height: 36),
+
+              // Short rule + description
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Container(
+                      width: 28, height: 1,
+                      color: AppColors.brandRed.withOpacity(0.7),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: SizedBox(
+                      width: isMobile ? double.infinity : 440,
+                      child: Text(
+                        'A private network for St. Cecilia\'s graduates. Connect with fellow alumni, attend exclusive events, and carry your legacy forward.',
+                        style: GoogleFonts.inter(
+                            fontSize: isMobile ? 14 : 15,
+                            color: Colors.white.withOpacity(0.48),
+                            height: 1.8,
+                            fontWeight: FontWeight.w300),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
               const SizedBox(height: 56),
-              Wrap(spacing: 16, runSpacing: 16, children: [
+
+              // CTA buttons
+              Wrap(spacing: 14, runSpacing: 14, children: [
                 GestureDetector(
                   onTap: () =>
                       Navigator.pushNamed(context, '/register'),
@@ -572,14 +719,23 @@ class _LandingPageState extends State<LandingPage> {
                     cursor: SystemMouseCursors.click,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 32, vertical: 16),
-                      color: AppColors.brandRed,
+                          horizontal: 36, vertical: 16),
+                      decoration: BoxDecoration(
+                        color: AppColors.brandRed,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.brandRed.withOpacity(0.3),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
                       child: Text('APPLY NOW',
                           style: GoogleFonts.inter(
-                              fontSize: 13,
+                              fontSize: 12,
                               fontWeight: FontWeight.w700,
                               color: Colors.white,
-                              letterSpacing: 2)),
+                              letterSpacing: 2.5)),
                     ),
                   ),
                 ),
@@ -590,33 +746,35 @@ class _LandingPageState extends State<LandingPage> {
                     cursor: SystemMouseCursors.click,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 32, vertical: 16),
+                          horizontal: 36, vertical: 16),
                       decoration: BoxDecoration(
                         border: Border.all(
-                            color: Colors.white.withOpacity(0.3),
-                            width: 0.5),
+                            color: Colors.white.withOpacity(0.15),
+                            width: 1),
                       ),
                       child: Text('SIGN IN',
                           style: GoogleFonts.inter(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white.withOpacity(0.8),
-                              letterSpacing: 2)),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white.withOpacity(0.7),
+                              letterSpacing: 2.5)),
                     ),
                   ),
                 ),
               ]),
-              const SizedBox(height: 80),
+
+              SizedBox(height: isMobile ? 56 : 80),
+
+              // Scroll hint
               Row(children: [
                 Container(
-                    width: 24,
-                    height: 0.5,
-                    color: Colors.white.withOpacity(0.3)),
+                    width: 18, height: 0.5,
+                    color: Colors.white.withOpacity(0.18)),
                 const SizedBox(width: 12),
                 Text('SCROLL TO EXPLORE',
                     style: GoogleFonts.inter(
                         fontSize: 9,
-                        color: Colors.white.withOpacity(0.3),
+                        color: Colors.white.withOpacity(0.22),
                         letterSpacing: 3)),
               ]),
             ],
