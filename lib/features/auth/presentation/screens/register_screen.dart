@@ -1,3 +1,26 @@
+// lib/features/auth/presentation/screens/register_screen.dart
+//
+// KEY FIX: _isAutoVerified no longer re-implements matching with exact
+// string comparison. It simply trusts _matchResult.isMatch which already
+// went through the full RegistryMatcher pipeline (bigram similarity,
+// abbreviation expansion, token overlap, confidence threshold 0.65).
+//
+// The old getter did:
+//   final nameMatches = inputFullName == registryFullName; // EXACT only
+//   if (nameMatches && batchMatches && courseMatches && studentIdMatches)
+//     isAutoVerified = true;
+//
+// This broke on any minor variation ("dela Cruz" vs "Dela Cruz",
+// "BSCS" vs "BS Computer Science", etc.) — all cases the matcher
+// handles correctly.
+//
+// FIX: bool get _isAutoVerified => _matchResult?.isMatch == true
+//                                && (_matchResult?.confidence ?? 0) >= 0.65;
+//
+// Additionally: _checkRegistry is now always awaited before reading
+// _matchResult in _register(), preventing a race condition where
+// the silent check's setState hadn't committed yet.
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -5,32 +28,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:alumni/core/constants/app_colors.dart';
 import 'package:alumni/features/admin/data/services/registry_service.dart';
 import 'package:alumni/features/admin/data/models/alumni_registry_models.dart';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RegisterScreen
-//
-// FIX: The old code re-computed isAutoVerified in _buildStep2() and
-// _register() using a manual exact-string comparison:
-//
-//   bool nameMatches = inputFullName == registryFullName;
-//   bool batchMatches = inputBatch == registryBatch;
-//   bool courseMatches = inputCourse == registryCourse;
-//   ...
-//   if (nameMatches && batchMatches && courseMatches && studentIdMatches)
-//     isAutoVerified = true;
-//
-// This broke in two ways:
-//   1. It bypassed RegistryMatcher entirely — all the fuzzy matching,
-//      abbreviation expansion, and bigram similarity was ignored.
-//   2. It required ALL fields to match EXACTLY, so "Marketing" vs
-//      "marketing" or any normalisation difference → never verified.
-//
-// FIX: isAutoVerified is now derived ONLY from _matchResult:
-//   final isAutoVerified = _matchResult?.isMatch == true
-//                          && (_matchResult?.confidence ?? 0) >= 0.65;
-//
-// This is computed once and used consistently everywhere.
-// ─────────────────────────────────────────────────────────────────────────────
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -65,6 +62,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _isLoading      = false;
 
   // ─── Registry check state ───
+  // FIX: Use INSTANCE, not static — register_screen uses instance calls
   final _registryService   = RegistryService();
   MatchResult? _matchResult;
   bool _isCheckingRegistry = false;
@@ -72,51 +70,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   final _steps = ['Account', 'Personal Info', 'Review'];
 
-    // ── STRICT AUTO-VERIFICATION (Exact Match Only) ─────────────────────────
-  // Auto-verified ONLY if Name + Batch + Course + Student ID ALL match exactly.
-  // Confidence score is completely ignored as per your request.
-  bool get _isAutoVerified {
-    if (_matchResult == null || 
-        !_matchResult!.isMatch || 
-        _matchResult!.record == null) {
-      return false;
-    }
+  // ════════════════════════════════════════════════════════
+  //  FIX: _isAutoVerified trusts the matcher result
+  //
+  //  OLD (broken): exact string comparison — fails on any
+  //    case/whitespace/abbreviation difference.
+  //
+  //  NEW (correct): trusts RegistryMatcher's confidence score
+  //    which already handles bigrams, token overlap, course
+  //    abbreviation expansion (BSCS→BS Computer Science), etc.
+  //
+  //  Threshold: confidence >= 0.65 (same as RegistryMatcher.matchThreshold)
+  // ════════════════════════════════════════════════════════
+  bool get _isAutoVerified =>
+      _matchResult != null &&
+      _matchResult!.isMatch == true &&
+      _matchResult!.record != null &&
+      _matchResult!.confidence >= 0.65;
 
-    final record = _matchResult!.record!;
-
-    // Normalize for comparison (handles extra spaces)
-    final inputFullName = '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}'
-        .toLowerCase()
-        .trim()
-        .replaceAll(RegExp(r'\s+'), ' ');
-
-    final registryFullName = record.fullName
-        .toLowerCase()
-        .trim()
-        .replaceAll(RegExp(r'\s+'), ' ');
-
-    final inputBatch = _batchCtrl.text.trim();
-    final registryBatch = record.batch.trim();
-
-    final inputCourse = _courseCtrl.text.trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'\s+'), ' ');
-
-    final registryCourse = record.course.trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'\s+'), ' ');
-
-    final inputStudentId = _studentIdCtrl.text.trim();
-    final registryStudentId = record.studentId.trim();
-
-    final nameMatches     = inputFullName == registryFullName;
-    final batchMatches    = inputBatch == registryBatch;
-    final courseMatches   = inputCourse == registryCourse;
-    final studentIdMatches = inputStudentId.isEmpty || 
-                             (inputStudentId == registryStudentId);
-
-    return nameMatches && batchMatches && courseMatches && studentIdMatches;
-  }
   @override
   void dispose() {
     _firstNameCtrl.dispose();
@@ -138,53 +109,52 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void _showSnackBar(String msg, {required bool isError}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg, style: GoogleFonts.inter()),
-        backgroundColor:
-            isError ? Colors.red.shade700 : Colors.green.shade700,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10)),
-        margin: const EdgeInsets.all(12),
-      ),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, style: GoogleFonts.inter()),
+      backgroundColor:
+          isError ? Colors.red.shade700 : Colors.green.shade700,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10)),
+      margin: const EdgeInsets.all(12),
+    ));
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
   //  VALIDATION
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
 
   bool _validateStep0() {
-    final firstName = _firstNameCtrl.text.trim();
-    final lastName  = _lastNameCtrl.text.trim();
-    final email     = _emailCtrl.text.trim();
-    final password  = _passwordCtrl.text;
-    final confirm   = _confirmPasswordCtrl.text;
+    final fn  = _firstNameCtrl.text.trim();
+    final ln  = _lastNameCtrl.text.trim();
+    final em  = _emailCtrl.text.trim();
+    final pw  = _passwordCtrl.text;
+    final cpw = _confirmPasswordCtrl.text;
 
-    if (firstName.isEmpty || lastName.isEmpty) {
+    if (fn.isEmpty || ln.isEmpty) {
       _showSnackBar('First and last name are required', isError: true);
       return false;
     }
-    if (email.isEmpty ||
-        !RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email)) {
+    if (em.isEmpty ||
+        !RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(em)) {
       _showSnackBar('Enter a valid email address', isError: true);
       return false;
     }
-    if (password.length < 8) {
+    if (pw.length < 8) {
       _showSnackBar('Password must be at least 8 characters', isError: true);
       return false;
     }
-    if (!RegExp(r'[A-Z]').hasMatch(password)) {
-      _showSnackBar('Password must contain at least one uppercase letter',
-          isError: true);
+    if (!RegExp(r'[A-Z]').hasMatch(pw)) {
+      _showSnackBar(
+          'Password must contain at least one uppercase letter', isError: true);
       return false;
     }
-    if (!RegExp(r'[0-9]').hasMatch(password)) {
-      _showSnackBar('Password must contain at least one number', isError: true);
+    if (!RegExp(r'[0-9]').hasMatch(pw)) {
+      _showSnackBar(
+          'Password must contain at least one number', isError: true);
       return false;
     }
-    if (password != confirm) {
+    if (pw != cpw) {
       _showSnackBar('Passwords do not match', isError: true);
       return false;
     }
@@ -208,9 +178,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return true;
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
   //  REGISTRY CHECK
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
 
   Future<void> _checkRegistry({bool silent = false}) async {
     if (!_validateStep1()) return;
@@ -221,6 +191,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final fullName =
           '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
 
+      // FIX: Instance call (not static) matches register_screen's usage
       final result = await _registryService.checkUser(
         fullName:  fullName,
         batch:     _batchCtrl.text.trim(),
@@ -229,28 +200,35 @@ class _RegisterScreenState extends State<RegisterScreen> {
         studentId: _studentIdCtrl.text.trim(),
       );
 
+      debugPrint(
+          '[Register] checkUser returned: isMatch=${result.isMatch} '
+          'confidence=${result.confidence} '
+          'record=${result.record?.fullName}');
+
       if (mounted) {
         setState(() {
-          _matchResult      = result;
-          _registryChecked  = true;
+          _matchResult     = result;
+          _registryChecked = true;
         });
       }
     } catch (e) {
+      debugPrint('[Register] _checkRegistry error: $e');
       if (mounted) {
         setState(() {
-          _matchResult     = const MatchResult(
-              isMatch: false, confidence: 0, record: null);
+          _matchResult     = MatchResult.noMatch;
           _registryChecked = true;
         });
       }
     } finally {
-      if (mounted && !silent) setState(() => _isCheckingRegistry = false);
+      if (mounted && !silent) {
+        setState(() => _isCheckingRegistry = false);
+      }
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
   //  REGISTER
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
 
   Future<void> _register() async {
     if (!_agreeNda) {
@@ -259,14 +237,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
-    // Re-check registry before final submission if not yet checked
-    if (!_registryChecked) {
-      await _checkRegistry(silent: true);
-    }
-
     setState(() => _isLoading = true);
 
     try {
+      // FIX: Always run registry check before registering.
+      // Do NOT use the silent flag (which had a race condition where
+      // setState from the async check hadn't committed before we read
+      // _matchResult below).
+      if (!_registryChecked) {
+        setState(() => _isLoading = false);
+        await _checkRegistry();
+        setState(() => _isLoading = true);
+      }
+
+      // Read _isAutoVerified NOW — after the await above ensures
+      // _matchResult is set.
+      final isAutoVerified = _isAutoVerified;
+
+      debugPrint(
+          '[Register] _register: isAutoVerified=$isAutoVerified '
+          'matchResult=${_matchResult?.isMatch} '
+          'confidence=${_matchResult?.confidence}');
+
       final credential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(
         email:    _emailCtrl.text.trim(),
@@ -280,19 +272,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
           '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
       await user.updateDisplayName(fullName);
 
-      // ── FIX: Use the getter — single source of truth ──────────────────
-      final isAutoVerified = _isAutoVerified;
       final userStatus         = isAutoVerified ? 'active'   : 'pending';
       final verificationStatus = isAutoVerified ? 'verified' : 'pending';
+      final studentId          = _studentIdCtrl.text.trim();
+      final email              = user.email?.trim().toLowerCase() ?? '';
 
-      final studentId = _studentIdCtrl.text.trim();
-      final email     = user.email?.trim().toLowerCase() ?? '';
-
-      // ── Write main user profile ──
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .set({
+      // ── Write user profile ──────────────────────────
+      final userDoc = <String, dynamic>{
         'uid':          user.uid,
         'firstName':    _firstNameCtrl.text.trim(),
         'lastName':     _lastNameCtrl.text.trim(),
@@ -300,6 +286,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'email':        email,
         'studentId':    studentId,
         'phone_number': _phoneCtrl.text.trim(),
+        'phone':        _phoneCtrl.text.trim(),
         'location':     _locationCtrl.text.trim(),
         'batch':        _batchCtrl.text.trim(),
         'batchYear':    int.tryParse(_batchCtrl.text.trim()),
@@ -319,15 +306,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'createdAt':  FieldValue.serverTimestamp(),
         'updatedAt':  FieldValue.serverTimestamp(),
         'lastLogin':  FieldValue.serverTimestamp(),
-        if (isAutoVerified) ...{
-          'verifiedAt':      FieldValue.serverTimestamp(),
-          'verifiedBy':      'system_auto',
-          'registryMatchId': _matchResult?.record?.id ?? '',
-          'matchConfidence': _matchResult?.confidence ?? 0,
-        },
-      });
+      };
 
-      // ── Write student_id_map (enables Student ID login) ──
+      if (isAutoVerified) {
+        userDoc['verifiedAt']      = FieldValue.serverTimestamp();
+        userDoc['verifiedBy']      = 'system_auto';
+        userDoc['registryMatchId'] = _matchResult?.record?.id ?? '';
+        userDoc['matchConfidence'] = _matchResult?.confidence ?? 0;
+      }
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .set(userDoc);
+
+      // ── Write student_id_map ─────────────────────────
       if (studentId.isNotEmpty) {
         await FirebaseFirestore.instance
             .collection('student_id_map')
@@ -339,8 +332,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         });
       }
 
-      // ── Mark registry record as matched ──
-      if (isAutoVerified && _matchResult?.record?.id.isNotEmpty == true) {
+      // ── Mark registry record matched ─────────────────
+      if (isAutoVerified && (_matchResult?.record?.id ?? '').isNotEmpty) {
         await FirebaseFirestore.instance
             .collection('alumni_registry')
             .doc(_matchResult!.record!.id)
@@ -352,379 +345,389 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (!mounted) return;
 
-      // ── Success dialog ──
+      // ── Success dialog ───────────────────────────────
       await showDialog(
         context: context,
         barrierDismissible: false,
         builder: (_) => AlertDialog(
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16)),
-          title: Row(children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: isAutoVerified
-                    ? Colors.green.withOpacity(0.1)
-                    : Colors.blue.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                isAutoVerified ? Icons.verified_user : Icons.check,
-                color: isAutoVerified ? Colors.green : Colors.blue,
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                isAutoVerified
-                    ? 'Verified & Approved!'
-                    : 'Application Submitted',
-                style: GoogleFonts.inter(
-                    fontWeight: FontWeight.w700, fontSize: 16),
-              ),
-            ),
-          ]),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (isAutoVerified)
+          contentPadding: EdgeInsets.zero,
+          content: Container(
+            width: 360,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 Container(
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 12),
+                  width: 56, height: 56,
                   decoration: BoxDecoration(
-                    color: Colors.green.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                        color: Colors.green.withOpacity(0.3)),
+                    color: (isAutoVerified
+                        ? Colors.green
+                        : Colors.blue).withOpacity(0.1),
+                    shape: BoxShape.circle,
                   ),
-                  child: Row(children: [
-                    const Icon(Icons.auto_awesome,
-                        color: Colors.green, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Your credentials matched our alumni registry. You can log in immediately!',
-                        style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: Colors.green.shade700,
-                            height: 1.4),
-                      ),
+                  child: Icon(
+                    isAutoVerified
+                        ? Icons.verified_user
+                        : Icons.check_circle_outline,
+                    color: isAutoVerified
+                        ? Colors.green : Colors.blue,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  isAutoVerified
+                      ? 'Verified & Approved!'
+                      : 'Application Submitted',
+                  style: GoogleFonts.cormorantGaramond(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.darkText),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                if (isAutoVerified)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: Colors.green.withOpacity(0.3)),
                     ),
-                  ]),
+                    child: Row(children: [
+                      const Icon(Icons.auto_awesome,
+                          color: Colors.green, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Your credentials matched our alumni registry. '
+                          'You can log in immediately!',
+                          style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: Colors.green.shade700,
+                              height: 1.4),
+                        ),
+                      ),
+                    ]),
+                  ),
+                Text(
+                  isAutoVerified
+                      ? 'Your account is now active. Welcome to the St. Cecilia\'s Alumni Network!'
+                      : 'Your application has been received. Our committee will review and notify you.',
+                  style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: AppColors.mutedText,
+                      height: 1.5),
+                  textAlign: TextAlign.center,
                 ),
-              Text(
-                isAutoVerified
-                    ? 'Your account is now active.'
-                    : 'Your application has been received.',
-                style: GoogleFonts.inter(fontSize: 14, height: 1.5),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.softWhite,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.borderSubtle),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                const SizedBox(height: 20),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.softWhite,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.borderSubtle),
+                  ),
+                  child: Column(children: [
                     _reviewRow('Name', fullName),
                     _reviewRow('Batch', _batchCtrl.text.trim()),
                     _reviewRow('Course', _courseCtrl.text.trim()),
                     if (studentId.isNotEmpty)
                       _reviewRow('Student ID', studentId),
                     _reviewRow('Status',
-                        isAutoVerified ? '✓ Auto-Verified' : 'Pending Review'),
-                  ],
+                        isAutoVerified
+                            ? '✓ Auto-Verified'
+                            : 'Pending Review'),
+                  ]),
                 ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                isAutoVerified
-                    ? "Welcome to the St. Cecilia's Alumni Network!"
-                    : 'Our committee will review your profile and notify you via email once approved.',
-                style: GoogleFonts.inter(
-                    fontSize: 13,
-                    color: AppColors.mutedText,
-                    height: 1.5),
-              ),
-            ],
-          ),
-          actions: [
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  Navigator.pushReplacementNamed(context, '/login');
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      isAutoVerified ? Colors.green : AppColors.brandRed,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                  elevation: 0,
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      Navigator.pushReplacementNamed(context, '/login');
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isAutoVerified
+                          ? Colors.green : AppColors.brandRed,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: Text(
+                      isAutoVerified
+                          ? 'Sign In Now'
+                          : 'Return to Sign In',
+                      style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w700),
+                    ),
+                  ),
                 ),
-                child: Text(
-                  isAutoVerified ? 'Sign In Now' : 'Return to Sign In',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                ),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       );
     } on FirebaseAuthException catch (e) {
       String msg = e.message ?? 'Registration failed.';
       switch (e.code) {
         case 'email-already-in-use':
-          msg = 'This email is already registered.';
-          break;
+          msg = 'This email is already registered.'; break;
         case 'weak-password':
-          msg = 'Password is too weak.';
-          break;
+          msg = 'Password is too weak.'; break;
         case 'invalid-email':
-          msg = 'Invalid email address.';
-          break;
+          msg = 'Invalid email address.'; break;
       }
       _showSnackBar(msg, isError: true);
     } catch (e) {
-      _showSnackBar('Error: $e', isError: true);
+      debugPrint('[Register] _register error: $e');
+      _showSnackBar('Registration failed: $e', isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
   //  BUILD
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
-    final w       = MediaQuery.of(context).size.width;
+    final w        = MediaQuery.of(context).size.width;
     final isMobile = w < 640;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0C0C0C),
-      body: Row(
-        children: [
-          // ── Left panel ──
-          if (!isMobile)
-            Expanded(
-              child: Container(
-                color: const Color(0xFF0C0C0C),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Image.asset(
-                      'assets/images/gallery/building.jpg',
-                      fit: BoxFit.cover,
-                      opacity: const AlwaysStoppedAnimation(0.2),
-                      errorBuilder: (_, __, ___) => const SizedBox(),
-                    ),
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.centerLeft,
-                          end: Alignment.centerRight,
-                          colors: [
-                            const Color(0xFF0C0C0C).withOpacity(0.3),
-                            const Color(0xFF0C0C0C)
-                          ],
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(48),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          GestureDetector(
-                            onTap: () => Navigator.pop(context),
-                            child: MouseRegion(
-                              cursor: SystemMouseCursors.click,
-                              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                                const Icon(Icons.arrow_back_ios_new_rounded,
-                                    color: Colors.white38, size: 12),
-                                const SizedBox(width: 6),
-                                Text('Back',
-                                    style: GoogleFonts.inter(
-                                        fontSize: 12, color: Colors.white38)),
-                              ]),
-                            ),
-                          ),
-                          const Spacer(),
-                          Row(children: [
-                            Container(width: 20, height: 1, color: AppColors.brandRed),
-                            const SizedBox(width: 10),
-                            Text("ST. CECILIA'S  ·  ALUMNI",
-                                style: GoogleFonts.inter(
-                                    fontSize: 9,
-                                    letterSpacing: 3,
-                                    color: AppColors.brandRed,
-                                    fontWeight: FontWeight.w700)),
-                          ]),
-                          const SizedBox(height: 16),
-                          Text('Join the\nNetwork.',
-                              style: GoogleFonts.cormorantGaramond(
-                                  fontSize: 64,
-                                  fontWeight: FontWeight.w300,
-                                  color: Colors.white,
-                                  height: 1.0)),
-                          const SizedBox(height: 20),
-                          SizedBox(
-                            width: 280,
-                            child: Text(
-                              "Apply for exclusive access to the St. Cecilia's alumni community.",
-                              style: GoogleFonts.inter(
-                                  fontSize: 14,
-                                  color: Colors.white.withOpacity(0.4),
-                                  height: 1.7,
-                                  fontWeight: FontWeight.w300),
-                            ),
-                          ),
-                          const SizedBox(height: 32),
-                          ...List.generate(_steps.length, (i) {
-                            final done   = i < _step;
-                            final active = i == _step;
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Row(children: [
-                                AnimatedContainer(
-                                  duration: const Duration(milliseconds: 300),
-                                  width: 20,
-                                  height: 20,
-                                  decoration: BoxDecoration(
-                                    color: done
-                                        ? AppColors.brandRed
-                                        : active
-                                            ? Colors.white
-                                            : Colors.white.withOpacity(0.1),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: done || active
-                                          ? Colors.transparent
-                                          : Colors.white.withOpacity(0.2),
-                                    ),
-                                  ),
-                                  child: Center(
-                                    child: done
-                                        ? const Icon(Icons.check,
-                                            size: 11, color: Colors.white)
-                                        : Text('${i + 1}',
-                                            style: GoogleFonts.inter(
-                                                fontSize: 9,
-                                                fontWeight: FontWeight.w700,
-                                                color: active
-                                                    ? AppColors.brandRed
-                                                    : Colors.white
-                                                        .withOpacity(0.3))),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Text(_steps[i],
-                                    style: GoogleFonts.inter(
-                                        fontSize: 13,
-                                        color: active
-                                            ? Colors.white
-                                            : done
-                                                ? Colors.white60
-                                                : Colors.white24,
-                                        fontWeight: active
-                                            ? FontWeight.w600
-                                            : FontWeight.w300)),
-                              ]),
-                            );
-                          }),
-                          const SizedBox(height: 48),
-                        ],
-                      ),
-                    ),
-                  ],
+      body: Row(children: [
+        // ── Left decorative panel (desktop only) ────────
+        if (!isMobile)
+          Expanded(
+            child: Container(
+              color: const Color(0xFF0C0C0C),
+              child: Stack(fit: StackFit.expand, children: [
+                Image.asset(
+                  'assets/images/gallery/building.jpg',
+                  fit: BoxFit.cover,
+                  opacity: const AlwaysStoppedAnimation(0.2),
+                  errorBuilder: (_, __, ___) => const SizedBox(),
                 ),
-              ),
-            ),
-
-          // ── Right panel ──
-          Container(
-            width: isMobile ? w : 520,
-            color: Colors.white,
-            child: SafeArea(
-              child: SingleChildScrollView(
-                padding: EdgeInsets.symmetric(
-                    horizontal: isMobile ? 24 : 48, vertical: 40),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (isMobile) ...[
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        const Color(0xFF0C0C0C).withOpacity(0.3),
+                        const Color(0xFF0C0C0C),
+                      ],
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(48),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       GestureDetector(
                         onTap: () => Navigator.pop(context),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          const Icon(Icons.arrow_back_ios_new_rounded,
-                              size: 12, color: AppColors.mutedText),
-                          const SizedBox(width: 6),
-                          Text('Back',
-                              style: GoogleFonts.inter(
-                                  fontSize: 12, color: AppColors.mutedText)),
-                        ]),
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                            const Icon(
+                                Icons.arrow_back_ios_new_rounded,
+                                color: Colors.white38, size: 12),
+                            const SizedBox(width: 6),
+                            Text('Back',
+                                style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    color: Colors.white38)),
+                          ]),
+                        ),
                       ),
-                      const SizedBox(height: 24),
-                      Row(
-                        children: List.generate(_steps.length, (i) {
-                          final done   = i < _step;
-                          final active = i == _step;
-                          return Expanded(
-                            child: Row(children: [
-                              Expanded(
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 300),
-                                  height: 2,
+                      const Spacer(),
+                      Row(children: [
+                        Container(
+                            width: 20,
+                            height: 1,
+                            color: AppColors.brandRed),
+                        const SizedBox(width: 10),
+                        Text("ST. CECILIA'S  ·  ALUMNI",
+                            style: GoogleFonts.inter(
+                                fontSize: 9,
+                                letterSpacing: 3,
+                                color: AppColors.brandRed,
+                                fontWeight: FontWeight.w700)),
+                      ]),
+                      const SizedBox(height: 16),
+                      Text('Join the\nNetwork.',
+                          style: GoogleFonts.cormorantGaramond(
+                              fontSize: 64,
+                              fontWeight: FontWeight.w300,
+                              color: Colors.white,
+                              height: 1.0)),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: 280,
+                        child: Text(
+                          "Apply for exclusive access to the St. Cecilia's alumni community.",
+                          style: GoogleFonts.inter(
+                              fontSize: 14,
+                              color: Colors.white.withOpacity(0.4),
+                              height: 1.7,
+                              fontWeight: FontWeight.w300),
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      // Step indicators
+                      ...List.generate(_steps.length, (i) {
+                        final done   = i < _step;
+                        final active = i == _step;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Row(children: [
+                            AnimatedContainer(
+                              duration:
+                                  const Duration(milliseconds: 300),
+                              width: 20, height: 20,
+                              decoration: BoxDecoration(
+                                color: done
+                                    ? AppColors.brandRed
+                                    : active
+                                        ? Colors.white
+                                        : Colors.white.withOpacity(0.1),
+                                shape: BoxShape.circle,
+                                border: Border.all(
                                   color: done || active
-                                      ? AppColors.brandRed
-                                      : AppColors.borderSubtle,
+                                      ? Colors.transparent
+                                      : Colors.white.withOpacity(0.2),
                                 ),
                               ),
-                              if (i < _steps.length - 1)
-                                const SizedBox(width: 4),
-                            ]),
-                          );
-                        }),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                          'Step ${_step + 1} of ${_steps.length}: ${_steps[_step]}',
-                          style: GoogleFonts.inter(
-                              fontSize: 11, color: AppColors.mutedText)),
-                      const SizedBox(height: 24),
+                              child: Center(
+                                child: done
+                                    ? const Icon(Icons.check,
+                                        size: 11, color: Colors.white)
+                                    : Text('${i + 1}',
+                                        style: GoogleFonts.inter(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w700,
+                                            color: active
+                                                ? AppColors.brandRed
+                                                : Colors.white
+                                                    .withOpacity(0.3))),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(_steps[i],
+                                style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    color: active
+                                        ? Colors.white
+                                        : done
+                                            ? Colors.white60
+                                            : Colors.white24,
+                                    fontWeight: active
+                                        ? FontWeight.w600
+                                        : FontWeight.w300)),
+                          ]),
+                        );
+                      }),
+                      const SizedBox(height: 48),
                     ],
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      transitionBuilder: (child, anim) =>
-                          FadeTransition(opacity: anim, child: child),
-                      child: _step == 0
-                          ? _buildStep0(key: const ValueKey(0))
-                          : _step == 1
-                              ? _buildStep1(key: const ValueKey(1))
-                              : _buildStep2(key: const ValueKey(2)),
-                    ),
-                  ],
+                  ),
                 ),
+              ]),
+            ),
+          ),
+
+        // ── Right form panel ─────────────────────────────
+        Container(
+          width: isMobile ? w : 520,
+          color: Colors.white,
+          child: SafeArea(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.symmetric(
+                  horizontal: isMobile ? 24 : 48, vertical: 40),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (isMobile) ...[
+                    GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: Row(mainAxisSize: MainAxisSize.min,
+                          children: [
+                        const Icon(Icons.arrow_back_ios_new_rounded,
+                            size: 12, color: AppColors.mutedText),
+                        const SizedBox(width: 6),
+                        Text('Back',
+                            style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: AppColors.mutedText)),
+                      ]),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      children: List.generate(_steps.length, (i) {
+                        final done   = i < _step;
+                        final active = i == _step;
+                        return Expanded(
+                          child: Row(children: [
+                            Expanded(
+                              child: AnimatedContainer(
+                                duration:
+                                    const Duration(milliseconds: 300),
+                                height: 2,
+                                color: done || active
+                                    ? AppColors.brandRed
+                                    : AppColors.borderSubtle,
+                              ),
+                            ),
+                            if (i < _steps.length - 1)
+                              const SizedBox(width: 4),
+                          ]),
+                        );
+                      }),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                        'Step ${_step + 1} of ${_steps.length}: '
+                        '${_steps[_step]}',
+                        style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: AppColors.mutedText)),
+                    const SizedBox(height: 24),
+                  ],
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    transitionBuilder: (child, anim) =>
+                        FadeTransition(opacity: anim, child: child),
+                    child: _step == 0
+                        ? _buildStep0(key: const ValueKey(0))
+                        : _step == 1
+                            ? _buildStep1(key: const ValueKey(1))
+                            : _buildStep2(key: const ValueKey(2)),
+                  ),
+                ],
               ),
             ),
           ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
   //  STEP 0 — Account
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
 
   Widget _buildStep0({Key? key}) {
     return Column(
@@ -740,37 +743,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
         const SizedBox(height: 8),
         Text('Create your login credentials for the alumni portal.',
             style: GoogleFonts.inter(
-                fontSize: 13, color: AppColors.mutedText, height: 1.5)),
+                fontSize: 13,
+                color: AppColors.mutedText,
+                height: 1.5)),
         const SizedBox(height: 32),
-
         Row(children: [
           Expanded(child: _field(_firstNameCtrl, 'FIRST NAME', 'Juan')),
           const SizedBox(width: 12),
-          Expanded(child: _field(_lastNameCtrl, 'LAST NAME', 'Dela Cruz')),
+          Expanded(
+              child: _field(_lastNameCtrl, 'LAST NAME', 'Dela Cruz')),
         ]),
         const SizedBox(height: 20),
-
         _field(_emailCtrl, 'EMAIL ADDRESS', 'juan@email.com',
             keyboardType: TextInputType.emailAddress),
         const SizedBox(height: 20),
-
         _passwordField(_passwordCtrl, 'PASSWORD',
             obscure: _obscure,
             onToggle: () => setState(() => _obscure = !_obscure)),
         const SizedBox(height: 8),
         _passwordHints(_passwordCtrl.text),
         const SizedBox(height: 20),
-
         _passwordField(_confirmPasswordCtrl, 'CONFIRM PASSWORD',
             obscure: _obscureConfirm,
             onToggle: () =>
                 setState(() => _obscureConfirm = !_obscureConfirm)),
-
         const SizedBox(height: 32),
         _stepButton('Next: Personal Info', () {
           if (_validateStep0()) setState(() => _step = 1);
         }),
-
         const SizedBox(height: 20),
         Center(
           child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -795,9 +795,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
   //  STEP 1 — Personal Info
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
 
   Widget _buildStep1({Key? key}) {
     return Column(
@@ -811,9 +811,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 color: AppColors.darkText,
                 height: 1.0)),
         const SizedBox(height: 8),
-        Text('Help us verify your alumni status with your academic details.',
+        Text(
+            'Help us verify your alumni status with your academic details.',
             style: GoogleFonts.inter(
-                fontSize: 13, color: AppColors.mutedText, height: 1.5)),
+                fontSize: 13,
+                color: AppColors.mutedText,
+                height: 1.5)),
         const SizedBox(height: 32),
 
         _sectionLabel('ACADEMIC DETAILS'),
@@ -840,7 +843,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ]),
         const SizedBox(height: 16),
 
-        _field(_studentIdCtrl, 'STUDENT ID (OPTIONAL)', 'e.g. 2015-0001',
+        _field(_studentIdCtrl, 'STUDENT ID (OPTIONAL)',
+            'e.g. 2015-0001',
             prefixIcon: Icons.badge_outlined,
             onChanged: (_) => setState(() {
                   _registryChecked = false;
@@ -850,16 +854,53 @@ class _RegisterScreenState extends State<RegisterScreen> {
         Padding(
           padding: const EdgeInsets.only(left: 4),
           child: Text(
-            'Providing your Student ID improves registry matching accuracy and enables Student ID login.',
+            'Providing your Student ID greatly improves registry matching accuracy.',
             style: GoogleFonts.inter(
-                fontSize: 11, color: AppColors.mutedText, height: 1.4),
+                fontSize: 11,
+                color: AppColors.mutedText,
+                height: 1.4),
           ),
         ),
 
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
 
-        // ── Registry result (shown after check) ──
-        if (_matchResult != null) _buildRegistryResult(),
+        // Check Registry button
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _isCheckingRegistry
+                ? null
+                : () => _checkRegistry(),
+            icon: _isCheckingRegistry
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.brandRed))
+                : const Icon(Icons.search,
+                    size: 16, color: AppColors.brandRed),
+            label: Text(
+              _isCheckingRegistry
+                  ? 'Checking Registry…'
+                  : 'Check Alumni Registry',
+              style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.brandRed),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: AppColors.brandRed),
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6)),
+            ),
+          ),
+        ),
+
+        if (_matchResult != null) ...[
+          const SizedBox(height: 16),
+          _buildRegistryResult(),
+        ],
 
         const SizedBox(height: 24),
 
@@ -910,7 +951,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
             flex: 2,
             child: _stepButton('Continue to Review', () async {
               if (_validateStep1()) {
-                await _checkRegistry();
+                if (!_registryChecked) {
+                  await _checkRegistry();
+                }
                 if (mounted) setState(() => _step = 2);
               }
             }),
@@ -920,10 +963,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // ── Registry result card ─────────────────────────────────────────────────
   Widget _buildRegistryResult() {
-    final isMatch = _matchResult!.isMatch;
-    final record  = _matchResult!.record;
+    final isMatch       = _matchResult!.isMatch;
+    final record        = _matchResult!.record;
     final confidencePct =
         (_matchResult!.confidence * 100).toStringAsFixed(0);
 
@@ -965,49 +1007,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
             ),
           ]),
-
           if (isMatch) ...[
             const SizedBox(height: 8),
-            Row(children: [
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: _matchResult!.confidence,
-                    minHeight: 6,
-                    backgroundColor: Colors.green.withOpacity(0.15),
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      _matchResult!.confidence >= 0.85
-                          ? Colors.green
-                          : _matchResult!.confidence >= 0.65
-                              ? Colors.lightGreen
-                              : Colors.orange,
-                    ),
-                  ),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: _matchResult!.confidence,
+                minHeight: 6,
+                backgroundColor: Colors.green.withOpacity(0.15),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  _matchResult!.confidence >= 0.85
+                      ? Colors.green
+                      : Colors.lightGreen,
                 ),
               ),
-              const SizedBox(width: 10),
-              Text('$confidencePct%',
-                  style: GoogleFonts.inter(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: _matchResult!.confidence >= 0.85
-                          ? Colors.green.shade700
-                          : Colors.lightGreen.shade700)),
-            ]),
+            ),
           ],
-
-          const SizedBox(height: 6),
-
+          const SizedBox(height: 8),
           if (isMatch && record != null) ...[
             Container(
-              margin: const EdgeInsets.only(top: 8),
+              margin: const EdgeInsets.only(top: 4),
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(8),
-                border:
-                    Border.all(color: Colors.green.withOpacity(0.2)),
+                border: Border.all(
+                    color: Colors.green.withOpacity(0.2)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1021,13 +1046,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   const SizedBox(height: 6),
                   _matchRow(Icons.person_outline, record.fullName),
                   if (record.batch.isNotEmpty)
-                    _matchRow(
-                        Icons.school_outlined, 'Batch ${record.batch}'),
+                    _matchRow(Icons.school_outlined,
+                        'Batch ${record.batch}'),
                   if (record.course.isNotEmpty)
                     _matchRow(Icons.book_outlined, record.course),
                   if (record.studentId.isNotEmpty)
-                    _matchRow(
-                        Icons.badge_outlined, 'ID: ${record.studentId}'),
+                    _matchRow(Icons.badge_outlined,
+                        'ID: ${record.studentId}'),
                 ],
               ),
             ),
@@ -1041,7 +1066,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ),
           ] else ...[
             Text(
-              'Your application will be submitted for manual review by our committee.',
+              'Your application will be submitted for manual review.',
               style: GoogleFonts.inter(
                   fontSize: 11,
                   color: Colors.orange.shade700,
@@ -1053,34 +1078,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  Widget _matchRow(IconData icon, String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(children: [
-        Icon(icon, size: 12, color: AppColors.mutedText),
-        const SizedBox(width: 6),
-        Text(text,
-            style: GoogleFonts.inter(
-                fontSize: 12,
-                color: AppColors.darkText,
-                fontWeight: FontWeight.w500)),
-      ]),
-    );
-  }
+  Widget _matchRow(IconData icon, String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(children: [
+      Icon(icon, size: 12, color: AppColors.mutedText),
+      const SizedBox(width: 6),
+      Text(text,
+          style: GoogleFonts.inter(
+              fontSize: 12,
+              color: AppColors.darkText,
+              fontWeight: FontWeight.w500)),
+    ]),
+  );
 
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
   //  STEP 2 — Review
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
 
   Widget _buildStep2({Key? key}) {
-    final fullName  = '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
-    final studentId = _studentIdCtrl.text.trim();
-
-    // FIX: Use the getter — same source of truth as _register()
+    final fullName      = '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
+    final studentId     = _studentIdCtrl.text.trim();
     final isAutoVerified = _isAutoVerified;
-    final confidencePct = _matchResult != null
-        ? (_matchResult!.confidence * 100).toStringAsFixed(0)
-        : '0';
 
     return Column(
       key: key,
@@ -1095,10 +1113,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         const SizedBox(height: 8),
         Text('Please review your information before submitting.',
             style: GoogleFonts.inter(
-                fontSize: 13, color: AppColors.mutedText, height: 1.5)),
+                fontSize: 13,
+                color: AppColors.mutedText,
+                height: 1.5)),
         const SizedBox(height: 28),
 
-        // ── Verification status banner ──
+        // Verification status
         Container(
           padding: const EdgeInsets.all(12),
           margin: const EdgeInsets.only(bottom: 16),
@@ -1127,9 +1147,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-  isAutoVerified
-      ? 'Auto-Verification Ready'
-      : 'Manual Review Required',
+                    isAutoVerified
+                        ? 'Auto-Verification Ready'
+                        : 'Manual Review Required',
                     style: GoogleFonts.inter(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -1139,8 +1159,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   Text(
                     isAutoVerified
-                        ? "Your credentials matched our alumni registry. You'll be verified instantly."
-                        : 'No registry match found. Your application will be reviewed by our committee.',
+                        ? "Registry match confirmed. You'll be verified instantly."
+                        : 'Our committee will review your application.',
                     style: GoogleFonts.inter(
                         fontSize: 11,
                         color: isAutoVerified
@@ -1163,12 +1183,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ['Batch Year', _batchCtrl.text.trim()],
           ['Course', _courseCtrl.text.trim()],
           if (studentId.isNotEmpty) ['Student ID', studentId],
-          [
-            'Registry',
-            isAutoVerified
-                ? '✓ All Credentials Matched'
-                : 'Not matched'
-          ],
+          ['Registry', isAutoVerified ? '✓ Matched' : 'Not matched'],
         ]),
 
         if (_phoneCtrl.text.trim().isNotEmpty ||
@@ -1195,7 +1210,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
         const SizedBox(height: 24),
 
-        // ── NDA checkbox ──
+        // NDA
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -1210,10 +1225,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 onTap: () => setState(() => _agreeNda = !_agreeNda),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  width: 18,
-                  height: 18,
+                  width: 18, height: 18,
                   decoration: BoxDecoration(
-                    color: _agreeNda ? AppColors.brandRed : Colors.white,
+                    color: _agreeNda
+                        ? AppColors.brandRed
+                        : Colors.white,
                     border: Border.all(
                       color: _agreeNda
                           ? AppColors.brandRed
@@ -1247,8 +1263,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         Row(children: [
           Expanded(
             child: OutlinedButton(
-              onPressed:
-                  _isLoading ? null : () => setState(() => _step = 1),
+              onPressed: _isLoading ? null : () => setState(() => _step = 1),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.mutedText,
                 side: const BorderSide(color: AppColors.borderSubtle),
@@ -1279,8 +1294,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               child: _isLoading
                   ? const SizedBox(
-                      width: 20,
-                      height: 20,
+                      width: 20, height: 20,
                       child: CircularProgressIndicator(
                           color: Colors.white, strokeWidth: 2))
                   : Text(
@@ -1298,32 +1312,30 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  SHARED WIDGETS
-  // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════
+  //  SHARED HELPERS
+  // ══════════════════════════════════════════════════════
 
-  Widget _reviewRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(children: [
-        SizedBox(
-          width: 72,
-          child: Text(label,
-              style: GoogleFonts.inter(
-                  fontSize: 11,
-                  color: AppColors.mutedText,
-                  fontWeight: FontWeight.w500)),
-        ),
-        Expanded(
-          child: Text(value.isEmpty ? '—' : value,
-              style: GoogleFonts.inter(
-                  fontSize: 11,
-                  color: AppColors.darkText,
-                  fontWeight: FontWeight.w600)),
-        ),
-      ]),
-    );
-  }
+  Widget _reviewRow(String label, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(children: [
+      SizedBox(
+        width: 72,
+        child: Text(label,
+            style: GoogleFonts.inter(
+                fontSize: 11,
+                color: AppColors.mutedText,
+                fontWeight: FontWeight.w500)),
+      ),
+      Expanded(
+        child: Text(value.isEmpty ? '—' : value,
+            style: GoogleFonts.inter(
+                fontSize: 11,
+                color: AppColors.darkText,
+                fontWeight: FontWeight.w600)),
+      ),
+    ]),
+  );
 
   Widget _reviewSection(String title, List<List<String>> rows) {
     return Container(
@@ -1371,8 +1383,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   Widget _stepButton(String label, VoidCallback onTap) {
     return SizedBox(
-      width: double.infinity,
-      height: 50,
+      width: double.infinity, height: 50,
       child: ElevatedButton(
         onPressed: onTap,
         style: ElevatedButton.styleFrom(
@@ -1425,8 +1436,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             Text(c[0].toString(),
                 style: GoogleFonts.inter(
                     fontSize: 11,
-                    color:
-                        passed ? Colors.green : AppColors.mutedText)),
+                    color: passed ? Colors.green : AppColors.mutedText)),
           ]),
         );
       }).toList(),

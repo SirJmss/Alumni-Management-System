@@ -4,17 +4,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 // ══════════════════════════════════════════════════════════
 //  ALUMNI RECORD
-//  One row from a CSV/Excel upload — represents a single
-//  verified graduate from the school's official records.
 // ══════════════════════════════════════════════════════════
 
 class AlumniRecord {
-  final String id;           // Firestore doc ID
+  final String id;
   final String firstName;
   final String lastName;
-  final String fullName;     // computed: "$firstName $lastName"
-  final String batch;        // e.g. "2019" or "2019-2020"
-  final String course;       // e.g. "BS Computer Science"
+  final String fullName;
+  final String batch;
+  final String course;
   final String email;
   final String studentId;
   final String uploadBatchId;
@@ -37,18 +35,28 @@ class AlumniRecord {
     this.createdAt,
   });
 
-  // ─── From Firestore doc ──────────────────────────────
+  // ─── From Firestore DocumentSnapshot ─────────────────
   factory AlumniRecord.fromDoc(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>? ?? {};
+    return AlumniRecord.fromMap(doc.id, d);
+  }
+
+  // ─── From raw map + id ────────────────────────────────
+  // This is the primary constructor used by RegistryService.
+  // fromDoc() delegates here — both are always in sync.
+  factory AlumniRecord.fromMap(String id, Map<String, dynamic> d) {
     final firstName = _s(d['firstName']);
     final lastName  = _s(d['lastName']);
-    // Support both stored fullName or computed from parts
-    final fullName = _s(d['fullName']).isNotEmpty
+    // fullName may be stored directly, or computed from parts
+    final fullName  = _s(d['fullName']).isNotEmpty
         ? _s(d['fullName'])
-        : '$firstName $lastName'.trim();
+        : [firstName, lastName]
+            .where((s) => s.isNotEmpty)
+            .join(' ')
+            .trim();
 
     return AlumniRecord(
-      id:            doc.id,
+      id:            id,
       firstName:     firstName,
       lastName:      lastName,
       fullName:      fullName,
@@ -57,7 +65,8 @@ class AlumniRecord {
       email:         _s(d['email']).toLowerCase(),
       studentId:     _s(d['studentId']),
       uploadBatchId: _s(d['uploadBatchId']),
-      isMatched:     d['isMatched'] as bool? ?? false,
+      // Safe bool: field may be absent on old records — default false
+      isMatched:     d['isMatched'] == true,
       matchedUserId: d['matchedUserId']?.toString(),
       createdAt:     (d['createdAt'] as Timestamp?)?.toDate(),
     );
@@ -74,38 +83,33 @@ class AlumniRecord {
     'studentId':     studentId,
     'uploadBatchId': uploadBatchId,
     'isMatched':     isMatched,
-    'matchedUserId': matchedUserId,
+    'matchedUserId': matchedUserId ?? '',
     'createdAt':     createdAt != null
                        ? Timestamp.fromDate(createdAt!)
                        : FieldValue.serverTimestamp(),
   };
 
-  // ─── Copy with overrides ─────────────────────────────
-  AlumniRecord copyWith({
-    bool?   isMatched,
-    String? matchedUserId,
-  }) => AlumniRecord(
-    id:            id,
-    firstName:     firstName,
-    lastName:      lastName,
-    fullName:      fullName,
-    batch:         batch,
-    course:        course,
-    email:         email,
-    studentId:     studentId,
-    uploadBatchId: uploadBatchId,
-    isMatched:     isMatched     ?? this.isMatched,
-    matchedUserId: matchedUserId ?? this.matchedUserId,
-    createdAt:     createdAt,
-  );
+  AlumniRecord copyWith({bool? isMatched, String? matchedUserId}) =>
+      AlumniRecord(
+        id:            id,
+        firstName:     firstName,
+        lastName:      lastName,
+        fullName:      fullName,
+        batch:         batch,
+        course:        course,
+        email:         email,
+        studentId:     studentId,
+        uploadBatchId: uploadBatchId,
+        isMatched:     isMatched     ?? this.isMatched,
+        matchedUserId: matchedUserId ?? this.matchedUserId,
+        createdAt:     createdAt,
+      );
 
-  static String _s(dynamic v) =>
-      v?.toString().trim() ?? '';
+  static String _s(dynamic v) => v?.toString().trim() ?? '';
 }
 
 // ══════════════════════════════════════════════════════════
 //  REGISTRY UPLOAD
-//  Metadata for one CSV/Excel upload batch.
 // ══════════════════════════════════════════════════════════
 
 class RegistryUpload {
@@ -113,8 +117,10 @@ class RegistryUpload {
   final String   fileName;
   final int      totalRecords;
   final int      matchedCount;
-  final String   status;       // 'completed' | 'processing' | 'error'
+  final String   status;
   final String   uploadedByName;
+  // Keep 'uploadedBy' alias so old callers don't break
+  String get uploadedBy => uploadedByName;
   final DateTime? uploadedAt;
 
   const RegistryUpload({
@@ -129,41 +135,38 @@ class RegistryUpload {
 
   factory RegistryUpload.fromDoc(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>? ?? {};
+    return RegistryUpload.fromMap(doc.id, d);
+  }
+
+  factory RegistryUpload.fromMap(String id, Map<String, dynamic> d) {
     return RegistryUpload(
-      id:             doc.id,
+      id:             id,
       fileName:       _s(d['fileName']),
       totalRecords:   _i(d['totalRecords']),
       matchedCount:   _i(d['matchedCount']),
       status:         _s(d['status'], 'completed'),
-      uploadedByName: _s(d['uploadedByName']),
-      uploadedAt:     (d['uploadedAt'] as Timestamp?)?.toDate(),
+      uploadedByName: _s(d['uploadedByName'],
+          _s(d['uploadedBy'])),
+      uploadedAt: (d['uploadedAt'] as Timestamp?)?.toDate(),
     );
   }
 
   static String _s(dynamic v, [String fb = '']) =>
-      v?.toString().trim().isNotEmpty == true ? v.toString().trim() : fb;
+      v?.toString().trim().isNotEmpty == true
+          ? v.toString().trim()
+          : fb;
   static int _i(dynamic v) =>
       v is int ? v : int.tryParse(v?.toString() ?? '') ?? 0;
 }
 
 // ══════════════════════════════════════════════════════════
 //  MATCH RESULT
-//  Returned by RegistryService.checkUser() — tells the
-//  register screen whether the signing-up user is found in
-//  the official alumni registry and how confident that is.
 // ══════════════════════════════════════════════════════════
 
 class MatchResult {
-  /// Whether ANY match was found above the threshold
   final bool isMatch;
-
-  /// 0.0 – 1.0
   final double confidence;
-
-  /// The matching registry record (null if no match)
   final AlumniRecord? record;
-
-  /// Human-readable breakdown for debugging / UI
   final Map<String, double> scoreBreakdown;
 
   const MatchResult({
@@ -173,16 +176,6 @@ class MatchResult {
     this.scoreBreakdown = const {},
   });
 
-  /// Convenience: whether this qualifies for strict auto-verification
-  bool get meetsStrictCriteria {
-    if (record == null) return false;
-    return record!.studentId.isNotEmpty &&
-           record!.batch.isNotEmpty &&
-           record!.course.isNotEmpty;
-  }
-
-  static const MatchResult noMatch = MatchResult(
-    isMatch:    false,
-    confidence: 0,
-  );
+  static const MatchResult noMatch =
+      MatchResult(isMatch: false, confidence: 0);
 }

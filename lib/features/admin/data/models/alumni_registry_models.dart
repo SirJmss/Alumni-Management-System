@@ -125,10 +125,15 @@ class MatchResult {
   final bool isMatch;
   final AlumniRecord? record;
   final double confidence; // 0.0 - 1.0
+  final Map<String, double> scoreBreakdown;
 
   const MatchResult({
     required this.isMatch,
     this.record,
     required this.confidence,
+    this.scoreBreakdown = const {},
   });
+
+  static const MatchResult noMatch =
+      MatchResult(isMatch: false, confidence: 0);
 }

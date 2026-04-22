@@ -9,6 +9,7 @@ import 'package:alumni/features/admin/data/models/alumni_registry_models.dart';
 import 'package:alumni/features/admin/data/services/csv_parser.dart';
 import 'package:alumni/features/admin/data/services/excel_parser.dart';
 import 'package:alumni/features/admin/data/services/registry_service.dart';
+import 'package:alumni/features/admin/presentation/screens/create_user_panel.dart';
 
 class UserVerificationScreen extends StatefulWidget {
   const UserVerificationScreen({super.key});
@@ -447,6 +448,8 @@ class _UserVerificationScreenState
                 style: GoogleFonts.inter(
                     color: AppColors.mutedText)),
           ),
+          
+
           ElevatedButton(
             onPressed: () =>
                 Navigator.pop(context, true),
@@ -457,6 +460,8 @@ class _UserVerificationScreenState
                   borderRadius:
                       BorderRadius.circular(8)),
             ),
+            
+            
             child: Text(
                 'Upload ${records.length} Records',
                 style: GoogleFonts.inter(
@@ -821,6 +826,7 @@ class _UserVerificationScreenState
     } catch (e) {
       _showSnackBar('Error: $e', isError: true);
     }
+    
   }
 
   Future<void> _deleteUser(
@@ -2984,10 +2990,12 @@ class _UserVerificationScreenState
 
           // ─── Main content ───
           Expanded(
+            
             child: Column(
               children: [
                 Container(
                   color: Colors.white,
+                  
                   padding: const EdgeInsets.symmetric(
                       horizontal: 40, vertical: 16),
                   child: Row(
@@ -3017,13 +3025,16 @@ class _UserVerificationScreenState
                                       : _currentTab == 1
                                           ? 'Accounts that have been rejected or denied access.'
                                           : 'Verify identities and moderate community interactions.',
+                                          
                               style: GoogleFonts.inter(
                                   fontSize: 13,
                                   color:
                                       AppColors.mutedText)),
                         ],
+                        
                       ),
                       if (_currentTab != 4)
+                      
                         ElevatedButton.icon(
                           onPressed: _loadUsers,
                           icon: const Icon(
@@ -3033,7 +3044,9 @@ class _UserVerificationScreenState
                               style: GoogleFonts.inter(
                                   fontWeight:
                                       FontWeight.w600)),
+                                      
                           style:
+                          
                               ElevatedButton.styleFrom(
                             backgroundColor:
                                 AppColors.brandRed,
@@ -3048,8 +3061,18 @@ class _UserVerificationScreenState
                                     borderRadius:
                                         BorderRadius
                                             .circular(8)),
+                                            
                           ),
-                        ),
+                        ),  
+                    ElevatedButton.icon(
+  onPressed: () => CreateUserPanel.show(context),
+  icon: const Icon(Icons.person_add_alt_1_outlined, size: 16),
+  label: Text('Create User', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+  style: ElevatedButton.styleFrom(
+    backgroundColor: AppColors.brandRed,
+    foregroundColor: Colors.white,
+  ),
+),
                     ],
                   ),
                 ),
@@ -3089,6 +3112,7 @@ class _UserVerificationScreenState
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: Row(children: [
+                        
                         _tabBtn('All Users', 0),
                         const SizedBox(width: 8),
                         // ─── Tab 1 is now Rejected ───
@@ -3101,7 +3125,11 @@ class _UserVerificationScreenState
                         const SizedBox(width: 8),
                         _tabBtn('Registry', 4),
                       ]),
+                      
+                      
+                      
                     ),
+                  
                     if (_currentTab != 4 &&
                         _currentTab != 3) ...[
                       const SizedBox(height: 10),
@@ -3141,8 +3169,10 @@ class _UserVerificationScreenState
                           ),
                         ),
                       ),
+                      
                     ],
                   ]),
+                  
                 ),
 
                 Expanded(
@@ -3165,6 +3195,7 @@ class _UserVerificationScreenState
                                                   color:
                                                       Colors.red)))
                                   : _buildTable(),
+                                  
                 ),
               ],
             ),
@@ -3175,8 +3206,10 @@ class _UserVerificationScreenState
   }
 
   Widget _buildTable() {
-    final data = _filtered;
 
+    
+    final data = _filtered;
+  
     if (data.isEmpty) {
       return Center(
         child: Column(
@@ -3190,6 +3223,7 @@ class _UserVerificationScreenState
             Text(
               _currentTab == 1
                   ? 'No rejected accounts'
+                  
                   : 'No users found',
               style: GoogleFonts.cormorantGaramond(
                   fontSize: 22,
@@ -3199,6 +3233,7 @@ class _UserVerificationScreenState
         ),
       );
     }
+    
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
