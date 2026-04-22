@@ -11,6 +11,29 @@ import 'package:alumni/features/admin/data/services/excel_parser.dart';
 import 'package:alumni/features/admin/data/services/registry_service.dart';
 import 'package:alumni/features/admin/presentation/screens/create_user_panel.dart';
 
+// ══════════════════════════════════════════════════════════════════════════
+//  ROLE PERMISSIONS
+// ══════════════════════════════════════════════════════════════════════════
+enum StaffRole { admin, registrar, moderator, unknown }
+
+extension StaffRoleX on StaffRole {
+  bool get canVerifyUsers      => this == StaffRole.admin || this == StaffRole.registrar;
+  bool get canManageEvents     => this == StaffRole.admin || this == StaffRole.moderator;
+  bool get canManageJobs       => this == StaffRole.admin;
+  bool get canManageAnnouncements => this == StaffRole.admin || this == StaffRole.moderator;
+  bool get canApprovePost      => this == StaffRole.admin || this == StaffRole.moderator;
+  bool get canSeeGrowthMetrics => this == StaffRole.admin || this == StaffRole.registrar;
+
+  static StaffRole from(String? raw) {
+    switch (raw?.toLowerCase().trim()) {
+      case 'admin':     return StaffRole.admin;
+      case 'registrar': return StaffRole.registrar;
+      case 'moderator': return StaffRole.moderator;
+      default:          return StaffRole.unknown;
+    }
+  }
+}
+
 class UserVerificationScreen extends StatefulWidget {
   const UserVerificationScreen({super.key});
 
@@ -33,6 +56,7 @@ class _UserVerificationScreenState
   String? errorMessage;
   String _adminName = 'Admin';
   String _adminRole = 'ADMIN';
+  StaffRole _role = StaffRole.unknown;
 
   final _searchController = TextEditingController();
   String _searchText = '';
@@ -89,6 +113,7 @@ class _UserVerificationScreenState
           _adminRole =
               data['role']?.toString().toUpperCase() ??
                   'ADMIN';
+          _role = StaffRoleX.from(data['role']?.toString());
         });
       }
     } catch (_) {}
@@ -2808,6 +2833,63 @@ class _UserVerificationScreenState
 
   @override
   Widget build(BuildContext context) {
+    // ─── Role-based access guard ───
+    if (!_role.canVerifyUsers) {
+      return Scaffold(
+        backgroundColor: AppColors.softWhite,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppColors.brandRed.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.lock_outline,
+                    size: 40, color: AppColors.brandRed),
+              ),
+              const SizedBox(height: 24),
+              Text('Access Denied',
+                  style: GoogleFonts.cormorantGaramond(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.darkText)),
+              const SizedBox(height: 12),
+              Text(
+                'Your role (${_role.toString().split('.').last.toUpperCase()}) does not have\npermission to access this page.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                    fontSize: 14,
+                    color: AppColors.mutedText,
+                    height: 1.6),
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton.icon(
+                onPressed: () =>
+                    Navigator.pushNamedAndRemoveUntil(
+                        context, '/admin_dashboard', (r) => false),
+                icon: const Icon(Icons.arrow_back, size: 16),
+                label: Text('Back to Dashboard',
+                    style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.brandRed,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.softWhite,
       body: Row(
@@ -2884,20 +2966,24 @@ class _UserVerificationScreenState
                               route:
                                   '/user_verification_moderation',
                               isActive: true),
-                          _sidebarItem(
-                              'Event Planning',
-                              route: '/event_planning'),
-                          _sidebarItem(
-                              'Job Board Management',
-                              route:
-                                  '/job_board_management'),
-                          _sidebarItem(
-                              'Growth Metrics',
-                              route: '/growth_metrics'),
-                          _sidebarItem(
-                              'Announcement Management',
-                              route:
-                                  '/announcement_management'),
+                          if (_role.canManageEvents)
+                            _sidebarItem(
+                                'Event Planning',
+                                route: '/event_planning'),
+                          if (_role.canManageJobs)
+                            _sidebarItem(
+                                'Job Board Management',
+                                route:
+                                    '/job_board_management'),
+                          if (_role.canSeeGrowthMetrics)
+                            _sidebarItem(
+                                'Growth Metrics',
+                                route: '/growth_metrics'),
+                          if (_role.canManageAnnouncements)
+                            _sidebarItem(
+                                'Announcement Management',
+                                route:
+                                    '/announcement_management'),
                         ]),
                       ],
                     ),
@@ -3033,46 +3119,52 @@ class _UserVerificationScreenState
                         ],
                         
                       ),
-                      if (_currentTab != 4)
                       
-                        ElevatedButton.icon(
-                          onPressed: _loadUsers,
-                          icon: const Icon(
-                              Icons.refresh,
-                              size: 16),
-                          label: Text('Refresh',
-                              style: GoogleFonts.inter(
-                                  fontWeight:
-                                      FontWeight.w600)),
-                                      
-                          style:
-                          
-                              ElevatedButton.styleFrom(
-                            backgroundColor:
-                                AppColors.brandRed,
-                            foregroundColor:
-                                Colors.white,
-                            padding:
-                                const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                    vertical: 12),
-                            shape:
-                                RoundedRectangleBorder(
-                                    borderRadius:
-                                        BorderRadius
-                                            .circular(8)),
-                                            
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_currentTab != 4)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: ElevatedButton.icon(
+                                onPressed: _loadUsers,
+                                icon: const Icon(
+                                    Icons.refresh,
+                                    size: 16),
+                                label: Text('',
+                                    style: GoogleFonts.inter(
+                                        fontWeight:
+                                            FontWeight.w600)),
+                                style:
+                                    ElevatedButton.styleFrom(
+                                  backgroundColor:
+                                      const Color.fromARGB(255, 253, 253, 253),
+                                  foregroundColor:
+                                      const Color.fromARGB(255, 0, 0, 0),
+                                  padding:
+                                      const EdgeInsets.symmetric(
+                                          horizontal: 0,
+                                          vertical: 0),
+                                  shape:
+                                      RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius
+                                                  .circular(30)),
+                                ),
+                              ),
+                            ),
+                          ElevatedButton.icon(
+                            onPressed: () => CreateUserPanel.show(context),
+                            icon: const Icon(Icons.person_add_alt_1_outlined, size: 16),
+                            label: Text('Create User', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.brandRed,
+                              foregroundColor: Colors.white,
+                            ),
                           ),
-                        ),  
-                    ElevatedButton.icon(
-  onPressed: () => CreateUserPanel.show(context),
-  icon: const Icon(Icons.person_add_alt_1_outlined, size: 16),
-  label: Text('Create User', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-  style: ElevatedButton.styleFrom(
-    backgroundColor: AppColors.brandRed,
-    foregroundColor: Colors.white,
-  ),
-),
+                        ],
+                      ),
+
                     ],
                   ),
                 ),
