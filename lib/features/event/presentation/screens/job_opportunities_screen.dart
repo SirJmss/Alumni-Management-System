@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:alumni/core/constants/app_colors.dart';
 import 'package:alumni/features/admin/presentation/screens/job_scorer.dart';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // JobOpportunitiesScreen
 //
@@ -1011,28 +1012,69 @@ class _JobOpportunitiesScreenState
   }
 
   // ─── URL launcher helper ──────────────────────────────────────────────────
-  Future<void> _launchUrl(String url) async {
+  // ── URL / email / phone launcher ─────────────────────────────────────────
+  //
+  // IMPORTANT: canLaunchUrl() returns false on many Android devices if the
+  // relevant <queries> intent filters are missing in AndroidManifest.xml.
+  // We call launchUrl() directly and let it throw if truly unsupported.
+  //
+  // AndroidManifest.xml MUST include inside <manifest>:
+  //   <queries>
+  //     <intent><action android:name="android.intent.action.VIEW"/></intent>
+  //     <intent><action android:name="android.intent.action.SENDTO"/></intent>
+  //     <intent><action android:name="android.intent.action.DIAL"/></intent>
+  //   </queries>
+
+  Future<void> _launchUrl(String rawUrl) async {
+    if (rawUrl.trim().isEmpty) return;
+
+    // Normalise: bare URLs without scheme get https:// prepended
+    String url = rawUrl.trim();
+    if (!url.startsWith('http://') &&
+        !url.startsWith('https://') &&
+        !url.startsWith('mailto:') &&
+        !url.startsWith('tel:')) {
+      url = 'https://$url';
+    }
+
     try {
       final uri = Uri.parse(url);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context)
-            ..clearSnackBars()
-            ..showSnackBar(SnackBar(
-              content: Text('Could not open: $url',
-                  style: GoogleFonts.inter()),
-              backgroundColor: Colors.red.shade700,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-              margin: const EdgeInsets.all(12),
-            ));
-        }
+
+      // Try externalApplication first (opens browser / mail app / dialer)
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched) {
+        // Fallback: let the platform decide
+        await launchUrl(uri, mode: LaunchMode.platformDefault);
       }
     } catch (e) {
-      debugPrint('URL launch error: $e');
+      debugPrint('[JobOpportunities] launch error for "$url": $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(
+            content: Row(children: [
+              const Icon(Icons.error_outline,
+                  color: Colors.white, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Could not open link. Try copying it manually.',
+                  style: GoogleFonts.inter(fontSize: 13),
+                ),
+              ),
+            ]),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+            margin: const EdgeInsets.all(12),
+            duration: const Duration(seconds: 3),
+          ));
+      }
     }
   }
 
@@ -1046,44 +1088,50 @@ class _JobOpportunitiesScreenState
     required Color color,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withOpacity(0.3)),
-        ),
-        child: Row(children: [
-          Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        splashColor: color.withOpacity(0.12),
+        highlightColor: color.withOpacity(0.06),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: color.withOpacity(0.35)),
+          ),
+          child: Row(children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: color, size: 18),
             ),
-            child: Icon(icon, color: color, size: 18),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-              Text(label,
-                  style: GoogleFonts.inter(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.darkText)),
-              Text(value,
-                  style: GoogleFonts.inter(
-                      fontSize: 11,
-                      color: color,
-                      fontWeight: FontWeight.w500),
-                  overflow: TextOverflow.ellipsis),
-            ]),
-          ),
-          Icon(Icons.chevron_right, color: color, size: 18),
-        ]),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(label,
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.darkText)),
+                Text(value,
+                    style: GoogleFonts.inter(
+                        fontSize: 11,
+                        color: color,
+                        fontWeight: FontWeight.w500),
+                    overflow: TextOverflow.ellipsis),
+              ]),
+            ),
+            Icon(Icons.arrow_outward_rounded, color: color, size: 16),
+          ]),
+        ),
       ),
     );
   }
