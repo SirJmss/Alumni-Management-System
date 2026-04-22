@@ -14,6 +14,24 @@ import 'package:alumni/core/constants/app_colors.dart';
 import 'package:alumni/features/admin/presentation/screens/admin_post_approval.dart'
     show CombinedPendingBadge;
 
+// ══════════════════════════════════════════════════════════════════════════
+//  ROLE PERMISSIONS
+// ══════════════════════════════════════════════════════════════════════════
+enum StaffRole { admin, registrar, moderator, unknown }
+
+extension StaffRoleX on StaffRole {
+  bool get canSeeGrowthMetrics => this == StaffRole.admin || this == StaffRole.registrar;
+
+  static StaffRole from(String? raw) {
+    switch (raw?.toLowerCase().trim()) {
+      case 'admin':     return StaffRole.admin;
+      case 'registrar': return StaffRole.registrar;
+      case 'moderator': return StaffRole.moderator;
+      default:          return StaffRole.unknown;
+    }
+  }
+}
+
 class GrowthMetricsScreen extends StatefulWidget {
   const GrowthMetricsScreen({super.key});
 
@@ -24,6 +42,7 @@ class GrowthMetricsScreen extends StatefulWidget {
 class _GrowthMetricsScreenState extends State<GrowthMetricsScreen> {
   String _adminName = 'Admin';
   String _adminRole = 'ADMIN';
+  StaffRole _role = StaffRole.unknown;
 
   @override
   void initState() {
@@ -45,6 +64,7 @@ class _GrowthMetricsScreenState extends State<GrowthMetricsScreen> {
               FirebaseAuth.instance.currentUser?.displayName ??
               'Admin';
           _adminRole = d['role']?.toString().toUpperCase() ?? 'ADMIN';
+          _role = StaffRoleX.from(d['role']?.toString());
         });
       }
     } catch (_) {}
@@ -56,6 +76,63 @@ class _GrowthMetricsScreenState extends State<GrowthMetricsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ─── Role-based access guard ───
+    if (!_role.canSeeGrowthMetrics) {
+      return Scaffold(
+        backgroundColor: AppColors.softWhite,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppColors.brandRed.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.lock_outline,
+                    size: 40, color: AppColors.brandRed),
+              ),
+              const SizedBox(height: 24),
+              Text('Access Denied',
+                  style: GoogleFonts.cormorantGaramond(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.darkText)),
+              const SizedBox(height: 12),
+              Text(
+                'Your role (${_adminRole}) does not have\npermission to access this page.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                    fontSize: 14,
+                    color: AppColors.mutedText,
+                    height: 1.6),
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton.icon(
+                onPressed: () =>
+                    Navigator.pushNamedAndRemoveUntil(
+                        context, '/admin_dashboard', (r) => false),
+                icon: const Icon(Icons.arrow_back, size: 16),
+                label: Text('Back to Dashboard',
+                    style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.brandRed,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.softWhite,
       body: Row(

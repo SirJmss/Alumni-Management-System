@@ -124,9 +124,9 @@ class _EventPlanningScreenState extends State<EventPlanningScreen> {
 
   bool get _canManage =>
       _userRole == 'admin'    ||
-      _userRole == 'staff'    ||
-      _userRole == 'moderator'||
-      _userRole == 'registrar';
+      _userRole == 'moderator';
+
+  bool get _hasAccess => _canManage;
 
   // ══════════════════════════════════════════════════════
   //  DIALOGS
@@ -542,6 +542,63 @@ class _EventPlanningScreenState extends State<EventPlanningScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ─── Role-based access guard ───
+    if (!_hasAccess) {
+      return Scaffold(
+        backgroundColor: AppColors.softWhite,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppColors.brandRed.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.lock_outline,
+                    size: 40, color: AppColors.brandRed),
+              ),
+              const SizedBox(height: 24),
+              Text('Access Denied',
+                  style: GoogleFonts.cormorantGaramond(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.darkText)),
+              const SizedBox(height: 12),
+              Text(
+                'Your role (${_userRole?.toUpperCase() ?? 'UNKNOWN'}) does not have\npermission to access this page.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                    fontSize: 14,
+                    color: AppColors.mutedText,
+                    height: 1.6),
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton.icon(
+                onPressed: () =>
+                    Navigator.pushNamedAndRemoveUntil(
+                        context, '/admin_dashboard', (r) => false),
+                icon: const Icon(Icons.arrow_back, size: 16),
+                label: Text('Back to Dashboard',
+                    style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.brandRed,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.softWhite,
       body: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
