@@ -3033,46 +3033,52 @@ class _UserVerificationScreenState
                         ],
                         
                       ),
-                      if (_currentTab != 4)
                       
-                        ElevatedButton.icon(
-                          onPressed: _loadUsers,
-                          icon: const Icon(
-                              Icons.refresh,
-                              size: 16),
-                          label: Text('Refresh',
-                              style: GoogleFonts.inter(
-                                  fontWeight:
-                                      FontWeight.w600)),
-                                      
-                          style:
-                          
-                              ElevatedButton.styleFrom(
-                            backgroundColor:
-                                AppColors.brandRed,
-                            foregroundColor:
-                                Colors.white,
-                            padding:
-                                const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                    vertical: 12),
-                            shape:
-                                RoundedRectangleBorder(
-                                    borderRadius:
-                                        BorderRadius
-                                            .circular(8)),
-                                            
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_currentTab != 4)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: ElevatedButton.icon(
+                                onPressed: _loadUsers,
+                                icon: const Icon(
+                                    Icons.refresh,
+                                    size: 16),
+                                label: Text('',
+                                    style: GoogleFonts.inter(
+                                        fontWeight:
+                                            FontWeight.w600)),
+                                style:
+                                    ElevatedButton.styleFrom(
+                                  backgroundColor:
+                                      const Color.fromARGB(255, 253, 253, 253),
+                                  foregroundColor:
+                                      const Color.fromARGB(255, 0, 0, 0),
+                                  padding:
+                                      const EdgeInsets.symmetric(
+                                          horizontal: 0,
+                                          vertical: 0),
+                                  shape:
+                                      RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius
+                                                  .circular(30)),
+                                ),
+                              ),
+                            ),
+                          ElevatedButton.icon(
+                            onPressed: () => CreateUserPanel.show(context),
+                            icon: const Icon(Icons.person_add_alt_1_outlined, size: 16),
+                            label: Text('Create User', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.brandRed,
+                              foregroundColor: Colors.white,
+                            ),
                           ),
-                        ),  
-                    ElevatedButton.icon(
-  onPressed: () => CreateUserPanel.show(context),
-  icon: const Icon(Icons.person_add_alt_1_outlined, size: 16),
-  label: Text('Create User', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-  style: ElevatedButton.styleFrom(
-    backgroundColor: AppColors.brandRed,
-    foregroundColor: Colors.white,
-  ),
-),
+                        ],
+                      ),
+
                     ],
                   ),
                 ),
