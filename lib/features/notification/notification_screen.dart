@@ -14,8 +14,7 @@ class NotificationsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
-      return const Scaffold(
-          body: Center(child: Text('Not logged in')));
+      return const Scaffold(body: Center(child: Text('Not logged in')));
     }
 
     return Scaffold(
@@ -34,9 +33,10 @@ class NotificationsScreen extends StatelessWidget {
             child: Text(
               'Mark all read',
               style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: AppColors.brandRed,
-                  fontWeight: FontWeight.w600),
+                fontSize: 12,
+                color: AppColors.brandRed,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
@@ -49,12 +49,11 @@ class NotificationsScreen extends StatelessWidget {
             .limit(50)
             .snapshots(),
         builder: (context, snapshot) {
-          // ─── Error state ───
+          // ── Error ──
           if (snapshot.hasError) {
             final error = snapshot.error.toString();
-            final needsIndex =
-                error.contains('FAILED_PRECONDITION') ||
-                    error.contains('requires an index');
+            final needsIndex = error.contains('FAILED_PRECONDITION') ||
+                error.contains('requires an index');
 
             return Center(
               child: Padding(
@@ -84,7 +83,10 @@ class NotificationsScreen extends StatelessWidget {
                     const SizedBox(height: 8),
                     Text(
                       needsIndex
-                          ? 'Go to Firebase Console → Firestore → Indexes and create a composite index:\n\nCollection: notifications\ntoUid → Ascending\ncreatedAt → Descending'
+                          ? 'Go to Firebase Console → Firestore → Indexes\n\n'
+                              'Collection: notifications\n'
+                              'toUid → Ascending\n'
+                              'createdAt → Descending'
                           : error,
                       style: GoogleFonts.inter(
                         fontSize: 12,
@@ -99,15 +101,14 @@ class NotificationsScreen extends StatelessWidget {
             );
           }
 
-          // ─── Loading ───
+          // ── Loading ──
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
-              child: CircularProgressIndicator(
-                  color: AppColors.brandRed),
+              child: CircularProgressIndicator(color: AppColors.brandRed),
             );
           }
 
-          // ─── Empty ───
+          // ── Empty ──
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return Center(
               child: Column(
@@ -123,7 +124,8 @@ class NotificationsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'You\'ll be notified about messages,\nevents, announcements and friend requests here.',
+                    'You\'ll be notified about messages, events,\n'
+                    'jobs, galleries, announcements and more.',
                     style: GoogleFonts.inter(
                         fontSize: 13, color: AppColors.mutedText),
                     textAlign: TextAlign.center,
@@ -152,50 +154,60 @@ class NotificationsScreen extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// Notification Tile
+// ─────────────────────────────────────────────────────────────
 class _NotificationTile extends StatelessWidget {
   final String id;
   final Map<String, dynamic> data;
 
   const _NotificationTile({required this.id, required this.data});
 
-  IconData _iconForType(String type) {
+  IconData _iconForType(NotifType type) {
     switch (type) {
-      case 'message':
+      case NotifType.message:
         return Icons.chat_bubble_outline_rounded;
-      case 'event':
+      case NotifType.event:
         return Icons.event_outlined;
-      case 'announcement':
+      case NotifType.announcement:
         return Icons.campaign_outlined;
-      case 'friend_request':
+      case NotifType.jobOpportunity:
+        return Icons.work_outline_rounded;
+      case NotifType.gallery:
+        return Icons.photo_library_outlined;
+      case NotifType.friendRequest:
         return Icons.person_add_outlined;
-      case 'friend_accepted':
+      case NotifType.friendAccepted:
         return Icons.people_outlined;
-      default:
-        return Icons.notifications_outlined;
+      case NotifType.system:
+        return Icons.info_outline_rounded;
     }
   }
 
-  Color _colorForType(String type) {
+  Color _colorForType(NotifType type) {
     switch (type) {
-      case 'message':
+      case NotifType.message:
         return AppColors.brandRed;
-      case 'event':
+      case NotifType.event:
         return Colors.blue.shade600;
-      case 'announcement':
+      case NotifType.announcement:
         return Colors.orange.shade600;
-      case 'friend_request':
+      case NotifType.jobOpportunity:
+        return Colors.teal.shade600;
+      case NotifType.gallery:
+        return Colors.pink.shade500;
+      case NotifType.friendRequest:
         return Colors.purple.shade600;
-      case 'friend_accepted':
+      case NotifType.friendAccepted:
         return Colors.green.shade600;
-      default:
-        return AppColors.mutedText;
+      case NotifType.system:
+        return Colors.grey.shade600;
     }
   }
 
   String _formatTime(dynamic value) {
     if (value == null) return '';
-    final dt =
-        value is Timestamp ? value.toDate() : DateTime.now();
+    final dt = value is Timestamp ? value.toDate() : DateTime.now();
     final diff = DateTime.now().difference(dt);
     if (diff.inMinutes < 1) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
@@ -204,43 +216,113 @@ class _NotificationTile extends StatelessWidget {
     return DateFormat('MMM d').format(dt);
   }
 
+  void _handleTap(BuildContext context, NotifType type, String refId) {
+    switch (type) {
+      case NotifType.message:
+        // Navigate to specific chat if refId is a chatId
+        Navigator.pushNamed(context, '/messages',
+            arguments: refId.isNotEmpty ? refId : null);
+        break;
+      case NotifType.event:
+        Navigator.pushNamed(context, '/events',
+            arguments: refId.isNotEmpty ? refId : null);
+        break;
+      case NotifType.announcement:
+        Navigator.pushNamed(context, '/announcements',
+            arguments: refId.isNotEmpty ? refId : null);
+        break;
+      case NotifType.jobOpportunity:
+        Navigator.pushNamed(context, '/jobs',
+            arguments: refId.isNotEmpty ? refId : null);
+        break;
+      case NotifType.gallery:
+        Navigator.pushNamed(context, '/gallery',
+            arguments: refId.isNotEmpty ? refId : null);
+        break;
+      case NotifType.friendRequest:
+        Navigator.pushNamed(context, '/friends');
+        break;
+      case NotifType.friendAccepted:
+        Navigator.pushNamed(context, '/friends',
+            arguments: refId.isNotEmpty ? refId : null);
+        break;
+      case NotifType.system:
+        // No navigation for system notifications unless refId is present
+        if (refId.isNotEmpty) {
+          Navigator.pushNamed(context, '/system', arguments: refId);
+        }
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final type = data['type']?.toString() ?? '';
+    final type =
+        NotifTypeX.fromString(data['type']?.toString() ?? '');
     final title = data['title']?.toString() ?? '';
     final body = data['body']?.toString() ?? '';
     final isRead = data['read'] == true;
     final createdAt = data['createdAt'];
+    final refId = data['refId']?.toString() ?? '';
+    final badgeCount = (data['badgeCount'] as int?) ?? 1;
     final color = _colorForType(type);
+    final showBadge = !isRead && badgeCount > 1;
 
     return InkWell(
       onTap: () {
         if (!isRead) NotificationService.markRead(id);
-        _handleTap(context, type);
+        _handleTap(context, type, refId);
       },
       child: Container(
         color: isRead
             ? Colors.transparent
             : AppColors.brandRed.withOpacity(0.04),
-        padding: const EdgeInsets.symmetric(
-            horizontal: 16, vertical: 14),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ─── Icon ───
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(_iconForType(type),
-                  color: color, size: 22),
+            // ── Icon with optional badge ──
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(_iconForType(type), color: color, size: 22),
+                ),
+                if (showBadge)
+                  Positioned(
+                    top: -5,
+                    right: -5,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.brandRed,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: AppColors.softWhite, width: 1.5),
+                      ),
+                      child: Text(
+                        badgeCount > 99 ? '99+' : '$badgeCount',
+                        style: GoogleFonts.inter(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(width: 14),
 
-            // ─── Content ───
+            // ── Content ──
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -271,7 +353,10 @@ class _NotificationTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    body,
+                    // Show grouped message copy when badgeCount > 1
+                    (type == NotifType.message && badgeCount > 1)
+                        ? '$badgeCount new messages · $body'
+                        : body,
                     style: GoogleFonts.inter(
                       fontSize: 13,
                       color: isRead
@@ -283,18 +368,17 @@ class _NotificationTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
 
-                  // ─── Friend request inline actions ───
-                  if (type == 'friend_request' && !isRead) ...[
+                  // ── Inline friend-request actions ──
+                  if (type == NotifType.friendRequest && !isRead) ...[
                     const SizedBox(height: 10),
                     _FriendRequestActions(
                       notificationId: id,
-                      fromUid: data['refId']?.toString() ?? '',
+                      fromUid: refId,
                     ),
                   ],
 
-                  // ─── Unread dot ───
-                  if (isRead == false &&
-                      type != 'friend_request') ...[
+                  // ── Unread dot (non-friend-request) ──
+                  if (!isRead && type != NotifType.friendRequest) ...[
                     const SizedBox(height: 6),
                     Row(
                       children: [
@@ -302,9 +386,7 @@ class _NotificationTile extends StatelessWidget {
                           width: 6,
                           height: 6,
                           decoration: BoxDecoration(
-                            color: color,
-                            shape: BoxShape.circle,
-                          ),
+                              color: color, shape: BoxShape.circle),
                         ),
                         const SizedBox(width: 4),
                         Text(
@@ -326,31 +408,11 @@ class _NotificationTile extends StatelessWidget {
       ),
     );
   }
-
-  void _handleTap(BuildContext context, String type) {
-    switch (type) {
-      case 'message':
-        Navigator.pushNamed(context, '/messages');
-        break;
-      case 'event':
-        Navigator.pushNamed(context, '/events');
-        break;
-      case 'announcement':
-        Navigator.pushNamed(context, '/announcements');
-        break;
-      case 'friend_request':
-        Navigator.pushNamed(context, '/friends');
-        break;
-      case 'friend_accepted':
-        Navigator.pushNamed(context, '/friends');
-        break;
-    }
-  }
 }
 
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 // Inline accept / decline for friend_request notifications
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
 class _FriendRequestActions extends StatefulWidget {
   final String notificationId;
   final String fromUid;
@@ -365,88 +427,83 @@ class _FriendRequestActions extends StatefulWidget {
       _FriendRequestActionsState();
 }
 
-class _FriendRequestActionsState
-    extends State<_FriendRequestActions> {
+class _FriendRequestActionsState extends State<_FriendRequestActions> {
   bool _isLoading = false;
   bool _isDone = false;
   String _doneMessage = '';
-  final currentUid = FirebaseAuth.instance.currentUser!.uid;
+
+  String get _currentUid => FirebaseAuth.instance.currentUser!.uid;
 
   Future<void> _accept() async {
+    if (widget.fromUid.isEmpty) return;
     setState(() => _isLoading = true);
+
     try {
       final batch = FirebaseFirestore.instance.batch();
       final now = FieldValue.serverTimestamp();
+      final db = FirebaseFirestore.instance;
 
+      // Create bidirectional connection
       batch.set(
-          FirebaseFirestore.instance
-              .collection('users')
-              .doc(currentUid)
-              .collection('connections')
-              .doc(widget.fromUid),
-          {'connectedAt': now});
-
+        db.collection('users').doc(_currentUid).collection('connections').doc(widget.fromUid),
+        {'connectedAt': now},
+      );
       batch.set(
-          FirebaseFirestore.instance
-              .collection('users')
-              .doc(widget.fromUid)
-              .collection('connections')
-              .doc(currentUid),
-          {'connectedAt': now});
+        db.collection('users').doc(widget.fromUid).collection('connections').doc(_currentUid),
+        {'connectedAt': now},
+      );
 
-      batch.delete(FirebaseFirestore.instance
-          .collection('friend_requests')
-          .doc('${widget.fromUid}_$currentUid'));
+      // Remove friend request document
+      batch.delete(
+        db.collection('friend_requests').doc('${widget.fromUid}_$_currentUid'),
+      );
 
+      // Increment connection counts
       batch.update(
-          FirebaseFirestore.instance
-              .collection('users')
-              .doc(currentUid),
-          {'connectionsCount': FieldValue.increment(1)});
-
+        db.collection('users').doc(_currentUid),
+        {'connectionsCount': FieldValue.increment(1)},
+      );
       batch.update(
-          FirebaseFirestore.instance
-              .collection('users')
-              .doc(widget.fromUid),
-          {'connectionsCount': FieldValue.increment(1)});
+        db.collection('users').doc(widget.fromUid),
+        {'connectionsCount': FieldValue.increment(1)},
+      );
 
       await batch.commit();
 
-      // Mark the notification as read
+      // Mark notification read
       await NotificationService.markRead(widget.notificationId);
 
-      // Notify the sender
-      final currentUserDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUid)
-          .get();
+      // Notify sender
+      final currentUserDoc = await db.collection('users').doc(_currentUid).get();
       final acceptorName =
           currentUserDoc.data()?['name']?.toString() ?? 'Someone';
 
       await NotificationService.sendFriendAcceptedNotification(
         toUid: widget.fromUid,
         acceptorName: acceptorName,
-        acceptorUid: currentUid,
+        acceptorUid: _currentUid,
       );
 
       if (mounted) {
         setState(() {
           _isLoading = false;
           _isDone = true;
-          _doneMessage = 'Connected!';
+          _doneMessage = 'Connected! 🎉';
         });
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _decline() async {
+    if (widget.fromUid.isEmpty) return;
     setState(() => _isLoading = true);
+
     try {
       await FirebaseFirestore.instance
           .collection('friend_requests')
-          .doc('${widget.fromUid}_$currentUid')
+          .doc('${widget.fromUid}_$_currentUid')
           .delete();
 
       await NotificationService.markRead(widget.notificationId);
@@ -458,7 +515,7 @@ class _FriendRequestActionsState
           _doneMessage = 'Request declined';
         });
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -471,7 +528,7 @@ class _FriendRequestActionsState
         style: GoogleFonts.inter(
           fontSize: 12,
           fontWeight: FontWeight.w600,
-          color: _doneMessage == 'Connected!'
+          color: _doneMessage.contains('🎉')
               ? Colors.green.shade700
               : AppColors.mutedText,
         ),
@@ -494,34 +551,37 @@ class _FriendRequestActionsState
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.brandRed,
             foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 6),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8)),
           ),
-          child: Text('Accept',
-              style: GoogleFonts.inter(
-                  fontSize: 12, fontWeight: FontWeight.w600)),
+          child: Text(
+            'Accept',
+            style: GoogleFonts.inter(
+                fontSize: 12, fontWeight: FontWeight.w600),
+          ),
         ),
         const SizedBox(width: 8),
         OutlinedButton(
           onPressed: _decline,
           style: OutlinedButton.styleFrom(
             foregroundColor: AppColors.mutedText,
-            side:
-                const BorderSide(color: AppColors.borderSubtle),
-            padding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 6),
+            side: const BorderSide(color: AppColors.borderSubtle),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8)),
           ),
-          child: Text('Decline',
-              style: GoogleFonts.inter(
-                  fontSize: 12, fontWeight: FontWeight.w600)),
+          child: Text(
+            'Decline',
+            style: GoogleFonts.inter(
+                fontSize: 12, fontWeight: FontWeight.w600),
+          ),
         ),
       ],
     );

@@ -10,17 +10,20 @@ import 'package:alumni/features/notification/notification_service.dart';
 import 'package:alumni/features/admin/presentation/screens/job_scorer.dart';
 import 'package:alumni/features/event/presentation/screens/job_opportunities_screen.dart';
 import 'package:alumni/features/notification/notification_screen.dart';
+import 'package:alumni/features/admin/data/services/in_app_notification.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DashboardScreen
 //
-// CHANGES:
-//  - Jobs now read from 'job_posting' collection (status == 'approved')
-//    instead of 'opportunities' — same collection as JobBoardManagementScreen
-//  - Scoring delegates to JobScorer (shared with JobOpportunitiesScreen)
-//  - Dashboard shows max 3 jobs: course-aligned first, then occupation-aligned
-//  - "View All" / "Browse All" navigates to JobOpportunitiesScreen
-//  - All null-safety guards and validation preserved
+// CHANGES v2:
+//  - Wrapped in InAppNotificationOverlay for real-time pop-up banners
+//  - AppBar bell now uses totalBadgeCountStream (counts grouped messages properly)
+//  - Quick-action "Alerts" badge uses unreadCountStream
+//  - Quick-action "Messages" badge uses unreadCountByTypeStream(message)
+//  - Quick-action "Network" badge uses unreadCountByTypeStream(friendRequest)
+//  - Jobs section notifies via NotifType.jobOpportunity
+//  - All send calls use typed NotifType enum
+//  - Input validation throughout _sendConnectionRequest / _followAlumni
 // ─────────────────────────────────────────────────────────────────────────────
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -31,19 +34,19 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   // ─── User profile ────────────────────────────────────────────────────────
-  String  userName             = 'Guest';
-  String  userRole             = 'Alumni';
-  String  userBatch            = '';
-  String  userCourse           = '';
-  String  userLocation         = '';
-  String  userOccupation       = '';
-  String  userCompany          = '';
-  String  userAbout            = '';
-  String  userPhone            = '';
+  String  userName               = 'Guest';
+  String  userRole               = 'Alumni';
+  String  userBatch              = '';
+  String  userCourse             = '';
+  String  userLocation           = '';
+  String  userOccupation         = '';
+  String  userCompany            = '';
+  String  userAbout              = '';
+  String  userPhone              = '';
   String? userPhotoUrl;
-  String  userStatus           = 'pending';
+  String  userStatus             = 'pending';
   String  userVerificationStatus = 'pending';
-  bool    isLoadingProfile     = true;
+  bool    isLoadingProfile       = true;
 
   // ─── Metrics ─────────────────────────────────────────────────────────────
   int totalAlumni    = 0;
@@ -51,13 +54,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int activeCourses  = 0;
 
   // ─── Content ─────────────────────────────────────────────────────────────
-  // Dashboard shows only 3 jobs — "View All" goes to JobOpportunitiesScreen
-  List<Map<String, dynamic>> recentOpportunities  = [];
-  List<Map<String, dynamic>> upcomingCalendar     = [];
-  List<Map<String, dynamic>> nearbyAlumni         = [];
-  List<Map<String, dynamic>> recentAnnouncements  = [];
+  List<Map<String, dynamic>> recentOpportunities = [];
+  List<Map<String, dynamic>> upcomingCalendar    = [];
+  List<Map<String, dynamic>> nearbyAlumni        = [];
+  List<Map<String, dynamic>> recentAnnouncements = [];
 
-  bool   isLoadingData = true;
+  bool    isLoadingData = true;
   String? errorMessage;
 
   @override
@@ -79,7 +81,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _loadUpcomingCalendar(),
         _loadRecentAnnouncements(),
       ]);
-      // Load after profile so course/occupation data is ready
       await Future.wait([
         _loadSmartOpportunities(),
         _loadBatchAndCourseMates(),
@@ -109,8 +110,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (!doc.exists) {
         setState(() {
           userName     = user.displayName?.trim().isNotEmpty == true
-              ? user.displayName!.trim()
-              : 'Member';
+              ? user.displayName!.trim() : 'Member';
           userRole     = 'Alumni';
           userPhotoUrl = user.photoURL;
         });
@@ -124,24 +124,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       setState(() {
-        userName       = g('name', fallback: user.displayName ?? 'Member');
-        userRole       = g('role', fallback: 'Alumni');
-        final photo    = g('profilePictureUrl', fallback: user.photoURL ?? '');
-        userPhotoUrl   = photo.isNotEmpty ? photo : null;
-        userBatch      = g('batch', fallback: g('batchYear'));
-        userCourse     = g('course', fallback: g('program'));
-        userLocation   = g('location');
-        userOccupation = g('occupation');
-        userCompany    = g('company');
-        userAbout      = g('about');
-        userPhone      = g('phone_number', fallback: g('phone'));
-        userStatus     = g('status', fallback: 'pending');
+        userName               = g('name', fallback: user.displayName ?? 'Member');
+        userRole               = g('role', fallback: 'Alumni');
+        final photo            = g('profilePictureUrl', fallback: user.photoURL ?? '');
+        userPhotoUrl           = photo.isNotEmpty ? photo : null;
+        userBatch              = g('batch', fallback: g('batchYear'));
+        userCourse             = g('course', fallback: g('program'));
+        userLocation           = g('location');
+        userOccupation         = g('occupation');
+        userCompany            = g('company');
+        userAbout              = g('about');
+        userPhone              = g('phone_number', fallback: g('phone'));
+        userStatus             = g('status', fallback: 'pending');
         userVerificationStatus = g('verificationStatus', fallback: 'pending');
       });
     } catch (e) {
       debugPrint('Profile error: $e');
       if (!mounted) return;
-      setState(() => errorMessage ??= 'Could not load your profile. Pull to refresh.');
+      setState(() => errorMessage ??=
+          'Could not load your profile. Pull to refresh.');
     }
   }
 
@@ -153,8 +154,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final results   = await Future.wait([
         firestore.collection('users').count().get(),
         firestore.collection('events')
-            .where('startDate', isGreaterThan: now)
-            .count().get(),
+            .where('startDate', isGreaterThan: now).count().get(),
         firestore.collection('courses').count().get(),
       ]);
       if (!mounted) return;
@@ -168,15 +168,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  SMART OPPORTUNITIES
-  //  Reads from 'job_posting' where status == 'approved'
-  //  (same collection JobBoardManagementScreen writes to)
-  //  Shows top 3 on dashboard; course-aligned first, then occupation-aligned.
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ─── Smart opportunities ──────────────────────────────────────────────────
   Future<void> _loadSmartOpportunities() async {
     try {
-      // Only show approved jobs to alumni
       final snap = await FirebaseFirestore.instance
           .collection('job_posting')
           .where('status', isEqualTo: 'approved')
@@ -190,14 +184,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return;
       }
 
-      // Map docs to a list and attach id
       final rawJobs = snap.docs.map((doc) {
         final data = Map<String, dynamic>.from(doc.data());
         data['id'] = doc.id;
         return data;
       }).toList();
 
-      // Delegate scoring to shared JobScorer
       final scored = JobScorer.scoreAndSort(
         jobs:           rawJobs,
         userCourse:     userCourse,
@@ -205,7 +197,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         userCompany:    userCompany,
       );
 
-      // Normalise fields for display
       final displayJobs = scored.map((data) {
         String g(String k, String fb) {
           final v = data[k]?.toString().trim();
@@ -226,10 +217,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         };
       }).toList();
 
-      setState(() {
-        // Dashboard shows only top 3
-        recentOpportunities = displayJobs.take(3).toList();
-      });
+      setState(() => recentOpportunities = displayJobs.take(3).toList());
     } catch (e) {
       debugPrint('Smart opportunities error: $e');
       await _loadFallbackOpportunities();
@@ -289,9 +277,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final ts   = data['startDate'];
           DateTime? date;
           if (ts is Timestamp) date = ts.toDate();
-          final title = (data['title']?.toString().trim().isNotEmpty ?? false)
-              ? data['title'].toString().trim()
-              : 'Upcoming event';
+          final title =
+              (data['title']?.toString().trim().isNotEmpty ?? false)
+                  ? data['title'].toString().trim()
+                  : 'Upcoming event';
           return {
             'id':       doc.id,
             'title':    title,
@@ -308,7 +297,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // ─── Alumni you may know ─────────────────────────────────────────────────
+  // ─── Alumni you may know ──────────────────────────────────────────────────
   Future<void> _loadBatchAndCourseMates() async {
     try {
       final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -328,7 +317,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (!mounted) return;
 
       final scored = <Map<String, dynamic>>[];
-
       for (var doc in snap.docs) {
         if (doc.id == currentUid) continue;
         final data   = doc.data();
@@ -375,11 +363,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         await _loadRandomAlumni(currentUid);
         return;
       }
-
       setState(() => nearbyAlumni = scored.take(8).toList());
     } catch (e) {
       debugPrint('Batch & Course mates error: $e');
-      await _loadRandomAlumni(FirebaseAuth.instance.currentUser?.uid ?? '');
+      await _loadRandomAlumni(
+          FirebaseAuth.instance.currentUser?.uid ?? '');
     }
   }
 
@@ -400,12 +388,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final data = d.data();
         return {
           'uid':       d.id,
-          'name':      data['name']?.toString()               ?? 'Alumni',
-          'headline':  data['headline']?.toString()           ?? data['course']?.toString() ?? 'Alumni',
-          'batch':     data['batch']?.toString()              ?? '',
-          'course':    data['course']?.toString()             ?? '',
-          'avatarUrl': data['profilePictureUrl']?.toString()  ?? '',
-          'location':  data['location']?.toString()           ?? '',
+          'name':      data['name']?.toString()              ?? 'Alumni',
+          'headline':  data['headline']?.toString()          ?? data['course']?.toString() ?? 'Alumni',
+          'batch':     data['batch']?.toString()             ?? '',
+          'course':    data['course']?.toString()            ?? '',
+          'avatarUrl': data['profilePictureUrl']?.toString() ?? '',
+          'location':  data['location']?.toString()          ?? '',
           'score':     0,
           'matchLabel':'',
         };
@@ -445,24 +433,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // ─── Connection actions ───────────────────────────────────────────────────
-  Future<void> _sendConnectionRequest(String toUid, String toName) async {
+  // ─── Connection / follow ──────────────────────────────────────────────────
+  Future<void> _sendConnectionRequest(
+      String toUid, String toName) async {
+    // Validate
+    if (toUid.trim().isEmpty || toName.trim().isEmpty) return;
     final fromUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    if (fromUid.isEmpty) return;
+    if (fromUid.isEmpty || fromUid == toUid) return;
 
     // Guard: already connected?
     final existing = await FirebaseFirestore.instance
-        .collection('users').doc(fromUid).collection('connections').doc(toUid).get();
+        .collection('users')
+        .doc(fromUid)
+        .collection('connections')
+        .doc(toUid)
+        .get();
     if (existing.exists) {
-      if (mounted) _showSnackBar('Already connected with $toName', isError: false);
+      _showSnackBar('Already connected with $toName', isError: false);
       return;
     }
 
     // Guard: request already sent?
     final pendingReq = await FirebaseFirestore.instance
-        .collection('friend_requests').doc('${fromUid}_$toUid').get();
+        .collection('friend_requests')
+        .doc('${fromUid}_$toUid')
+        .get();
     if (pendingReq.exists) {
-      if (mounted) _showSnackBar('Request already sent to $toName', isError: false);
+      _showSnackBar('Request already sent to $toName', isError: false);
+      return;
+    }
+
+    // Guard: incoming request from them already?
+    final incomingReq = await FirebaseFirestore.instance
+        .collection('friend_requests')
+        .doc('${toUid}_$fromUid')
+        .get();
+    if (incomingReq.exists) {
+      _showSnackBar(
+          '$toName already sent you a request — check your notifications!',
+          isError: false);
       return;
     }
 
@@ -477,40 +486,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      final fromDoc  = await FirebaseFirestore.instance.collection('users').doc(fromUid).get();
-      final fromName = fromDoc.data()?['name']?.toString() ?? 'Someone';
+      final fromDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(fromUid)
+          .get();
+      final fromName =
+          fromDoc.data()?['name']?.toString().trim().isNotEmpty == true
+              ? fromDoc.data()!['name'].toString().trim()
+              : 'Someone';
 
       await NotificationService.sendFriendRequestNotification(
-        toUid: toUid, fromName: fromName, fromUid: fromUid,
+        toUid:    toUid,
+        fromName: fromName,
+        fromUid:  fromUid,
       );
 
       if (mounted) _showSnackBar('Request sent to $toName!', isError: false);
     } catch (e) {
-      if (mounted) _showSnackBar('Error: $e', isError: true);
+      if (mounted) _showSnackBar('Error sending request: $e', isError: true);
     }
   }
 
   Future<void> _followAlumni(String toUid, String toName) async {
+    if (toUid.trim().isEmpty || toName.trim().isEmpty) return;
     final fromUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    if (fromUid.isEmpty) return;
+    if (fromUid.isEmpty || fromUid == toUid) return;
 
     final existing = await FirebaseFirestore.instance
-        .collection('users').doc(fromUid).collection('following').doc(toUid).get();
+        .collection('users')
+        .doc(fromUid)
+        .collection('following')
+        .doc(toUid)
+        .get();
     if (existing.exists) {
-      if (mounted) _showSnackBar('Already following $toName', isError: false);
+      _showSnackBar('Already following $toName', isError: false);
       return;
     }
 
     try {
       final now        = FieldValue.serverTimestamp();
       final writeBatch = FirebaseFirestore.instance.batch();
-
       writeBatch.set(
-        FirebaseFirestore.instance.collection('users').doc(fromUid).collection('following').doc(toUid),
+        FirebaseFirestore.instance
+            .collection('users').doc(fromUid)
+            .collection('following').doc(toUid),
         {'followedAt': now, 'uid': toUid},
       );
       writeBatch.set(
-        FirebaseFirestore.instance.collection('users').doc(toUid).collection('followers').doc(fromUid),
+        FirebaseFirestore.instance
+            .collection('users').doc(toUid)
+            .collection('followers').doc(fromUid),
         {'followedAt': now, 'uid': fromUid},
       );
       writeBatch.update(
@@ -518,10 +543,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         {'followersCount': FieldValue.increment(1)},
       );
       await writeBatch.commit();
-
       if (mounted) _showSnackBar('Now following $toName!', isError: false);
     } catch (e) {
-      if (mounted) _showSnackBar('Error: $e', isError: true);
+      if (mounted) _showSnackBar('Error following: $e', isError: true);
     }
   }
 
@@ -531,9 +555,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ..clearSnackBars()
       ..showSnackBar(SnackBar(
         content: Text(msg, style: GoogleFonts.inter()),
-        backgroundColor: isError ? Colors.red.shade700 : Colors.green.shade700,
+        backgroundColor:
+            isError ? Colors.red.shade700 : Colors.green.shade700,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(12),
       ));
   }
@@ -542,25 +568,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Log Out', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
-        content: Text('Are you sure you want to log out?', style: GoogleFonts.inter()),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Log Out',
+            style:
+                GoogleFonts.inter(fontWeight: FontWeight.w700)),
+        content: Text('Are you sure you want to log out?',
+            style: GoogleFonts.inter()),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel', style: GoogleFonts.inter(color: AppColors.mutedText)),
+            child: Text('Cancel',
+                style:
+                    GoogleFonts.inter(color: AppColors.mutedText)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: Text('Log Out',
-                style: GoogleFonts.inter(color: AppColors.brandRed, fontWeight: FontWeight.w600)),
+                style: GoogleFonts.inter(
+                    color: AppColors.brandRed,
+                    fontWeight: FontWeight.w600)),
           ),
         ],
       ),
     );
     if (confirm != true) return;
     await FirebaseAuth.instance.signOut();
-    if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
+    if (mounted) {
+      Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
+    }
   }
 
   // ─── Profile completion ───────────────────────────────────────────────────
@@ -579,11 +615,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   List<String> get _missingFields {
     final m = <String>[];
-    if (userPhotoUrl == null)      m.add('profile photo');
-    if (userLocation.isEmpty)      m.add('location');
-    if (userOccupation.isEmpty)    m.add('occupation');
-    if (userAbout.isEmpty)         m.add('about section');
-    if (userPhone.isEmpty)         m.add('phone number');
+    if (userPhotoUrl == null)   m.add('profile photo');
+    if (userLocation.isEmpty)   m.add('location');
+    if (userOccupation.isEmpty) m.add('occupation');
+    if (userAbout.isEmpty)      m.add('about section');
+    if (userPhone.isEmpty)      m.add('phone number');
     return m;
   }
 
@@ -603,158 +639,192 @@ class _DashboardScreenState extends State<DashboardScreen> {
       userStatus == 'rejected'  || userStatus == 'denied' ||
       userVerificationStatus == 'rejected';
 
-  // ─── Navigate to full job board ───────────────────────────────────────────
-  void _goToJobs() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => JobOpportunitiesScreen(
-          userCourse:     userCourse,
-          userOccupation: userOccupation,
-          userCompany:    userCompany,
-        ),
+  void _goToJobs() => Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => JobOpportunitiesScreen(
+        userCourse:     userCourse,
+        userOccupation: userOccupation,
+        userCompany:    userCompany,
       ),
-    );
-  }
+    ),
+  );
 
   // ═══════════════════════════════════════════════════════════════════════════
   //  BUILD
+  //  ↳ Wrapped in InAppNotificationOverlay so new Firestore notifications
+  //    pop up as banners while the user browses the dashboard.
   // ═══════════════════════════════════════════════════════════════════════════
-
   @override
   Widget build(BuildContext context) {
-    final isLoading  = isLoadingProfile || isLoadingData;
-    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final isLoading   = isLoadingProfile || isLoadingData;
+    final currentUid  = FirebaseAuth.instance.currentUser?.uid ?? '';
     final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 768;
+    final isMobile    = screenWidth < 768;
 
     String firstName() {
       if (userName.trim().isEmpty) return 'there';
       return userName.trim().split(' ').first;
     }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF6F6F7),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        centerTitle: false,
-        iconTheme: const IconThemeData(color: AppColors.darkText),
-        title: Text(
-          'Alumni',
-          style: GoogleFonts.cormorantGaramond(
-            fontSize: 22,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 2.0,
-            color: AppColors.brandRed,
+    // ── InAppNotificationOverlay wraps the entire Scaffold ──
+    return InAppNotificationOverlay(
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF6F6F7),
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0.5,
+          centerTitle: false,
+          iconTheme: const IconThemeData(color: AppColors.darkText),
+          title: Text(
+            'Alumni',
+            style: GoogleFonts.cormorantGaramond(
+              fontSize: 22,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 2.0,
+              color: AppColors.brandRed,
+            ),
           ),
-        ),
-        actions: [
-          StreamBuilder<int>(
-            stream: NotificationService.unreadCountStream(currentUid),
-            builder: (context, snapshot) {
-              final count = snapshot.data ?? 0;
-              return IconButton(
-                tooltip: 'Notifications',
-                icon: Stack(clipBehavior: Clip.none, children: [
-                  const Icon(Icons.notifications_none_rounded,
-                      color: AppColors.darkText, size: 24),
-                  if (count > 0)
-                    Positioned(
-                      right: -2, top: -2,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(
-                            color: AppColors.brandRed,
-                            shape: BoxShape.circle),
-                        child: Text(
-                          count > 99 ? '99+' : '$count',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 8,
-                              fontWeight: FontWeight.bold),
+          actions: [
+            // ── Bell: uses totalBadgeCountStream so grouped messages
+            //    (badgeCount > 1) contribute their full count, not just 1 ──
+            StreamBuilder<int>(
+              stream: currentUid.isNotEmpty
+                  ? NotificationService.totalBadgeCountStream(currentUid)
+                  : Stream.value(0),
+              builder: (context, snapshot) {
+                final count = snapshot.data ?? 0;
+                return IconButton(
+                  tooltip: 'Notifications',
+                  icon: Stack(clipBehavior: Clip.none, children: [
+                    const Icon(Icons.notifications_none_rounded,
+                        color: AppColors.darkText, size: 24),
+                    if (count > 0)
+                      Positioned(
+                        right: -2,
+                        top: -2,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                              color: AppColors.brandRed,
+                              shape: BoxShape.circle),
+                          child: Text(
+                            count > 99 ? '99+' : '$count',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold),
+                          ),
                         ),
                       ),
-                    ),
-                ]),
-                onPressed: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const NotificationsScreen())),
-              );
-            },
-          ),
-          const SizedBox(width: 12),
-        ],
-      ),
-      drawer: _buildDrawer(),
-      body: RefreshIndicator(
-        onRefresh: _loadAllData,
-        color: AppColors.brandRed,
-        child: isLoading
-            ? const Center(
-                child: CircularProgressIndicator(
-                    color: AppColors.brandRed, strokeWidth: 2.5))
-            : CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: [
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 24, isMobile ? 16 : 20, 0),
-                    sliver: SliverToBoxAdapter(child: _buildHeroSection(firstName(), isMobile)),
+                  ]),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const NotificationsScreen()),
                   ),
-
-                  if (isPending || isRejected)
+                );
+              },
+            ),
+            const SizedBox(width: 12),
+          ],
+        ),
+        drawer: _buildDrawer(currentUid),
+        body: RefreshIndicator(
+          onRefresh: _loadAllData,
+          color: AppColors.brandRed,
+          child: isLoading
+              ? const Center(
+                  child: CircularProgressIndicator(
+                      color: AppColors.brandRed, strokeWidth: 2.5))
+              : CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
                     SliverPadding(
-                      padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 16, isMobile ? 16 : 20, 0),
-                      sliver: SliverToBoxAdapter(child: _buildVerificationBanner()),
-                    ),
-
-                  if (isVerified && _profileCompletion < 80)
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 16, isMobile ? 16 : 20, 0),
-                      sliver: SliverToBoxAdapter(child: _buildProfileCompletionBanner()),
-                    ),
-
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 20, isMobile ? 16 : 20, 0),
-                    sliver: SliverToBoxAdapter(child: _buildQuickActionsRow(currentUid)),
-                  ),
-
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 24, isMobile ? 16 : 20, 0),
-                    sliver: SliverToBoxAdapter(
-                        child: _FriendRequestsBanner(currentUid: currentUid)),
-                  ),
-
-                  if (upcomingCalendar.isNotEmpty)
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 8, isMobile ? 16 : 20, 0),
-                      sliver: SliverToBoxAdapter(child: _buildUpcomingEventsSection()),
-                    ),
-
-                  if (recentAnnouncements.isNotEmpty)
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 24, isMobile ? 16 : 20, 0),
-                      sliver: SliverToBoxAdapter(child: _buildAnnouncementsSection()),
-                    ),
-
-                  // Dashboard: top 3 jobs + VIEW ALL
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 24, isMobile ? 16 : 20, 0),
-                    sliver: SliverToBoxAdapter(child: _buildOpportunitiesSection()),
-                  ),
-
-                  if (nearbyAlumni.isNotEmpty)
-                    SliverPadding(
-                      padding: EdgeInsets.fromLTRB(isMobile ? 16 : 20, 24, isMobile ? 16 : 20, 0),
+                      padding: EdgeInsets.fromLTRB(
+                          isMobile ? 16 : 20, 24,
+                          isMobile ? 16 : 20, 0),
                       sliver: SliverToBoxAdapter(
-                          child: _buildAlumniNetworkSection(currentUid)),
+                          child: _buildHeroSection(firstName(), isMobile)),
                     ),
 
-                  const SliverPadding(
-                    padding: EdgeInsets.only(bottom: 40),
-                    sliver: SliverToBoxAdapter(child: SizedBox()),
-                  ),
-                ],
-              ),
+                    if (isPending || isRejected)
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                            isMobile ? 16 : 20, 16,
+                            isMobile ? 16 : 20, 0),
+                        sliver: SliverToBoxAdapter(
+                            child: _buildVerificationBanner()),
+                      ),
+
+                    if (isVerified && _profileCompletion < 80)
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                            isMobile ? 16 : 20, 16,
+                            isMobile ? 16 : 20, 0),
+                        sliver: SliverToBoxAdapter(
+                            child: _buildProfileCompletionBanner()),
+                      ),
+
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                          isMobile ? 16 : 20, 20,
+                          isMobile ? 16 : 20, 0),
+                      sliver: SliverToBoxAdapter(
+                          child: _buildQuickActionsRow(currentUid)),
+                    ),
+
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                          isMobile ? 16 : 20, 24,
+                          isMobile ? 16 : 20, 0),
+                      sliver: SliverToBoxAdapter(
+                          child: _FriendRequestsBanner(
+                              currentUid: currentUid)),
+                    ),
+
+                    if (upcomingCalendar.isNotEmpty)
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                            isMobile ? 16 : 20, 8,
+                            isMobile ? 16 : 20, 0),
+                        sliver: SliverToBoxAdapter(
+                            child: _buildUpcomingEventsSection()),
+                      ),
+
+                    if (recentAnnouncements.isNotEmpty)
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                            isMobile ? 16 : 20, 24,
+                            isMobile ? 16 : 20, 0),
+                        sliver: SliverToBoxAdapter(
+                            child: _buildAnnouncementsSection()),
+                      ),
+
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                          isMobile ? 16 : 20, 24,
+                          isMobile ? 16 : 20, 0),
+                      sliver: SliverToBoxAdapter(
+                          child: _buildOpportunitiesSection()),
+                    ),
+
+                    if (nearbyAlumni.isNotEmpty)
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                            isMobile ? 16 : 20, 24,
+                            isMobile ? 16 : 20, 0),
+                        sliver: SliverToBoxAdapter(
+                            child: _buildAlumniNetworkSection(currentUid)),
+                      ),
+
+                    const SliverPadding(
+                      padding: EdgeInsets.only(bottom: 40),
+                      sliver: SliverToBoxAdapter(child: SizedBox()),
+                    ),
+                  ],
+                ),
+        ),
       ),
     );
   }
@@ -768,12 +838,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Welcome back,',
-            style: GoogleFonts.inter(fontSize: isMobile ? 12 : 13, color: AppColors.mutedText)),
+            style: GoogleFonts.inter(
+                fontSize: isMobile ? 12 : 13,
+                color: AppColors.mutedText)),
         const SizedBox(height: 4),
         Text(firstName,
             style: GoogleFonts.cormorantGaramond(
-                fontSize: isMobile ? 28 : 36, height: 1.0,
-                fontWeight: FontWeight.w600, color: AppColors.darkText)),
+                fontSize: isMobile ? 28 : 36,
+                height: 1.0,
+                fontWeight: FontWeight.w600,
+                color: AppColors.darkText)),
         const SizedBox(height: 12),
         Wrap(spacing: 8, runSpacing: 8, children: [
           if (userBatch.isNotEmpty)
@@ -794,12 +868,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
               border: Border.all(color: Colors.amber.shade200),
             ),
             child: Row(children: [
-              Icon(Icons.info_outline, size: 16, color: Colors.amber.shade700),
+              Icon(Icons.info_outline,
+                  size: 16, color: Colors.amber.shade700),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(errorMessage!,
                     style: GoogleFonts.inter(
-                        fontSize: 11, color: Colors.amber.shade900)),
+                        fontSize: 11,
+                        color: Colors.amber.shade900)),
               ),
             ]),
           ),
@@ -827,7 +903,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
               Text('Application Rejected',
                   style: GoogleFonts.inter(
                       fontSize: 13,
@@ -835,9 +913,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       color: Colors.red.shade700)),
               const SizedBox(height: 2),
               Text(
-                  'Your application was not approved. Contact support for more information.',
+                  'Your application was not approved. Contact support.',
                   style: GoogleFonts.inter(
-                      fontSize: 11, color: Colors.red.shade600, height: 1.4)),
+                      fontSize: 11,
+                      color: Colors.red.shade600,
+                      height: 1.4)),
             ]),
           ),
         ]),
@@ -860,17 +940,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
             Text('Verification Pending',
                 style: GoogleFonts.inter(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: Colors.orange.shade700)),
             const SizedBox(height: 2),
-            Text(
-                "Your account is under review. You'll be notified once approved.",
+            Text("Your account is under review. You'll be notified once approved.",
                 style: GoogleFonts.inter(
-                    fontSize: 11, color: Colors.orange.shade600, height: 1.4)),
+                    fontSize: 11,
+                    color: Colors.orange.shade600,
+                    height: 1.4)),
           ]),
         ),
         const SizedBox(width: 8),
@@ -890,34 +973,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
         border: Border.all(color: AppColors.borderSubtle),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text('Complete your profile',
-              style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.darkText)),
-          Text('$pct%',
-              style: GoogleFonts.cormorantGaramond(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.brandRed)),
-        ]),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Complete your profile',
+                style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.darkText)),
+            Text('$pct%',
+                style: GoogleFonts.cormorantGaramond(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.brandRed)),
+          ],
+        ),
         const SizedBox(height: 8),
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
             value: pct / 100,
             backgroundColor: AppColors.borderSubtle,
-            valueColor: const AlwaysStoppedAnimation(AppColors.brandRed),
+            valueColor:
+                const AlwaysStoppedAnimation(AppColors.brandRed),
             minHeight: 6,
           ),
         ),
         const SizedBox(height: 8),
         if (missing.isNotEmpty)
           Text(
-              'Add your ${missing.take(2).join(', ')}${missing.length > 2 ? ' and more' : ''} to be more visible.',
+              'Add your ${missing.take(2).join(', ')}'
+              '${missing.length > 2 ? ' and more' : ''} to be more visible.',
               style: GoogleFonts.inter(
-                  fontSize: 11, color: AppColors.mutedText, height: 1.4)),
+                  fontSize: 11,
+                  color: AppColors.mutedText,
+                  height: 1.4)),
         const SizedBox(height: 10),
         GestureDetector(
           onTap: () => Navigator.pushNamed(context, '/edit_profile'),
@@ -929,62 +1019,94 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     letterSpacing: 1,
                     color: AppColors.brandRed)),
             const SizedBox(width: 4),
-            const Icon(Icons.arrow_forward, size: 12, color: AppColors.brandRed),
+            const Icon(Icons.arrow_forward,
+                size: 12, color: AppColors.brandRed),
           ]),
         ),
       ]),
     );
   }
 
+  // ── Quick actions row
+  //    Each relevant action circle now shows its own badge type:
+  //      Messages → message-type unread badge count (grouped sum)
+  //      Network  → friend_request unread count
+  //      Alerts   → total unread count
   Widget _buildQuickActionsRow(String currentUid) {
-    return StreamBuilder<int>(
-      stream: NotificationService.unreadCountStream(currentUid),
-      builder: (context, snapshot) {
-        final notifCount = snapshot.data ?? 0;
-        return SizedBox(
-          height: 90,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            children: [
-              _buildActionCircle('Network',  Icons.people_outline,
-                  () => Navigator.pushNamed(context, '/friends')),
-              _buildActionCircle('Messages', Icons.mail_outline,
-                  () => Navigator.pushNamed(context, '/messages')),
-              _buildActionCircle('Alerts',   Icons.notifications_none_rounded,
-                  () => Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const NotificationsScreen())),
-                  badge: notifCount),
-              _buildActionCircle('Events',  Icons.event_outlined,
-                  () => Navigator.pushNamed(context, '/events')),
-              _buildActionCircle('Jobs',    Icons.work_outline, _goToJobs),
-              _buildActionCircle('Discuss', Icons.forum_outlined,
-                  () => Navigator.pushNamed(context, '/discussions')),
-              _buildActionCircle('Profile', Icons.person_outline,
-                  () => Navigator.pushNamed(context, '/profile')),
-            ],
+    return SizedBox(
+      height: 90,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          // Network — show pending friend requests badge
+          StreamBuilder<int>(
+            stream: currentUid.isNotEmpty
+                ? NotificationService.unreadCountByTypeStream(
+                    currentUid, NotifType.friendRequest)
+                : Stream.value(0),
+            builder: (_, snap) => _buildActionCircle(
+              'Network', Icons.people_outline,
+              () => Navigator.pushNamed(context, '/friends'),
+              badge: snap.data ?? 0,
+            ),
           ),
-        );
-      },
+          // Messages — show grouped message badge (sum of badgeCounts)
+          StreamBuilder<int>(
+            stream: currentUid.isNotEmpty
+                ? NotificationService.unreadCountByTypeStream(
+                    currentUid, NotifType.message)
+                : Stream.value(0),
+            builder: (_, snap) => _buildActionCircle(
+              'Messages', Icons.mail_outline,
+              () => Navigator.pushNamed(context, '/messages'),
+              badge: snap.data ?? 0,
+            ),
+          ),
+          // Alerts — total badge count (all types combined)
+          StreamBuilder<int>(
+            stream: currentUid.isNotEmpty
+                ? NotificationService.totalBadgeCountStream(currentUid)
+                : Stream.value(0),
+            builder: (_, snap) => _buildActionCircle(
+              'Alerts', Icons.notifications_none_rounded,
+              () => Navigator.push(context,
+                  MaterialPageRoute(
+                      builder: (_) => const NotificationsScreen())),
+              badge: snap.data ?? 0,
+            ),
+          ),
+          _buildActionCircle('Events', Icons.event_outlined,
+              () => Navigator.pushNamed(context, '/events')),
+          _buildActionCircle('Jobs', Icons.work_outline, _goToJobs),
+          _buildActionCircle('Gallery', Icons.photo_library_outlined,
+              () => Navigator.pushNamed(context, '/gallery')),
+          _buildActionCircle('Discuss', Icons.forum_outlined,
+              () => Navigator.pushNamed(context, '/discussions')),
+          _buildActionCircle('Profile', Icons.person_outline,
+              () => Navigator.pushNamed(context, '/profile')),
+        ],
+      ),
     );
   }
 
-
-
   Widget _buildUpcomingEventsSection() {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _sectionHeader('Upcoming Events', 'VIEW ALL',
-          onTap: () => Navigator.pushNamed(context, '/events')),
-      const SizedBox(height: 16),
-      SizedBox(
-        height: 140,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: upcomingCalendar.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 12),
-          itemBuilder: (_, i) => _eventCard(upcomingCalendar[i]),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader('Upcoming Events', 'VIEW ALL',
+            onTap: () => Navigator.pushNamed(context, '/events')),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 140,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: upcomingCalendar.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (_, i) => _eventCard(upcomingCalendar[i]),
+          ),
         ),
-      ),
-    ]);
+      ],
+    );
   }
 
   Widget _eventCard(Map<String, dynamic> event) {
@@ -998,75 +1120,89 @@ class _DashboardScreenState extends State<DashboardScreen> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppColors.borderSubtle),
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppColors.brandRed.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Column(children: [
-                Text(event['day'].toString(),
-                    style: GoogleFonts.cormorantGaramond(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.brandRed,
-                        height: 1.0)),
-                Text(event['month'].toString(),
-                    style: GoogleFonts.inter(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.brandRed,
-                        letterSpacing: 0.5)),
-              ]),
-            ),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                  color: AppColors.softWhite,
-                  borderRadius: BorderRadius.circular(4)),
-              child: Text(
-                (event['type'] ?? '').toString().toUpperCase(),
-                style: GoogleFonts.inter(
-                    fontSize: 7,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.mutedText,
-                    letterSpacing: 0.5),
-              ),
-            ),
-          ]),
-          const SizedBox(height: 10),
-          Text(event['title'].toString(),
-              style: GoogleFonts.inter(
-                  fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.darkText),
-              maxLines: 2, overflow: TextOverflow.ellipsis),
-          if ((event['location'] ?? '').toString().isNotEmpty) ...[
-            const SizedBox(height: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Row(children: [
-              const Icon(Icons.location_on_outlined,
-                  size: 10, color: AppColors.mutedText),
-              const SizedBox(width: 2),
-              Expanded(
-                child: Text(event['location'].toString(),
-                    style: GoogleFonts.inter(fontSize: 9, color: AppColors.mutedText),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.brandRed.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Column(children: [
+                  Text(event['day'].toString(),
+                      style: GoogleFonts.cormorantGaramond(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.brandRed,
+                          height: 1.0)),
+                  Text(event['month'].toString(),
+                      style: GoogleFonts.inter(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.brandRed,
+                          letterSpacing: 0.5)),
+                ]),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                    color: AppColors.softWhite,
+                    borderRadius: BorderRadius.circular(4)),
+                child: Text(
+                  (event['type'] ?? '').toString().toUpperCase(),
+                  style: GoogleFonts.inter(
+                      fontSize: 7,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.mutedText,
+                      letterSpacing: 0.5),
+                ),
               ),
             ]),
+            const SizedBox(height: 10),
+            Text(event['title'].toString(),
+                style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.darkText),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis),
+            if ((event['location'] ?? '').toString().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Row(children: [
+                const Icon(Icons.location_on_outlined,
+                    size: 10, color: AppColors.mutedText),
+                const SizedBox(width: 2),
+                Expanded(
+                  child: Text(event['location'].toString(),
+                      style: GoogleFonts.inter(
+                          fontSize: 9, color: AppColors.mutedText),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ),
+              ]),
+            ],
           ],
-        ]),
+        ),
       ),
     );
   }
 
   Widget _buildAnnouncementsSection() {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _sectionHeader('Announcements', 'VIEW ALL',
-          onTap: () => Navigator.pushNamed(context, '/announcements')),
-      const SizedBox(height: 16),
-      ...recentAnnouncements.map(_announcementCard),
-    ]);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader('Announcements', 'VIEW ALL',
+            onTap: () =>
+                Navigator.pushNamed(context, '/announcements')),
+        const SizedBox(height: 16),
+        ...recentAnnouncements.map(_announcementCard),
+      ],
+    );
   }
 
   Widget _announcementCard(Map<String, dynamic> ann) {
@@ -1092,161 +1228,176 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(ann['title'].toString(),
-                  style: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.darkText),
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
-              if ((ann['body'] ?? '').toString().isNotEmpty) ...[
-                const SizedBox(height: 2),
-                Text(ann['body'].toString(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(ann['title'].toString(),
                     style: GoogleFonts.inter(
-                        fontSize: 11, color: AppColors.mutedText, height: 1.4),
-                    maxLines: 2, overflow: TextOverflow.ellipsis),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.darkText),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                if ((ann['body'] ?? '').toString().isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(ann['body'].toString(),
+                      style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: AppColors.mutedText,
+                          height: 1.4),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                ],
+                if ((ann['date'] ?? '').toString().isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(ann['date'].toString(),
+                      style: GoogleFonts.inter(
+                          fontSize: 9,
+                          color: AppColors.mutedText,
+                          fontWeight: FontWeight.w600)),
+                ],
               ],
-              if ((ann['date'] ?? '').toString().isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(ann['date'].toString(),
-                    style: GoogleFonts.inter(
-                        fontSize: 9,
-                        color: AppColors.mutedText,
-                        fontWeight: FontWeight.w600)),
-              ],
-            ]),
+            ),
           ),
-          const Icon(Icons.chevron_right, color: AppColors.mutedText, size: 18),
+          const Icon(Icons.chevron_right,
+              color: AppColors.mutedText, size: 18),
         ]),
       ),
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  OPPORTUNITIES SECTION — dashboard (max 3 jobs)
-  //  Course-aligned jobs shown first, then occupation-aligned.
-  //  "VIEW ALL" navigates to JobOpportunitiesScreen.
-  // ═══════════════════════════════════════════════════════════════════════════
   Widget _buildOpportunitiesSection() {
-    final hasRelevant =
-        recentOpportunities.any((o) => (o['score'] as int? ?? 0) > 0);
+    final hasRelevant = recentOpportunities
+        .any((o) => (o['score'] as int? ?? 0) > 0);
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      // ── Section header ──
-      Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(
-              hasRelevant ? 'Jobs For You' : 'Job Opportunities',
-              style: GoogleFonts.cormorantGaramond(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w500,
-                  fontStyle: FontStyle.italic),
-            ),
-            if (userCourse.isNotEmpty && hasRelevant)
-              Text('Matched to your course & experience',
-                  style: GoogleFonts.inter(
-                      fontSize: 10,
-                      color: AppColors.mutedText,
-                      fontStyle: FontStyle.italic)),
-          ]),
-          GestureDetector(
-            onTap: _goToJobs,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppColors.brandRed.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.brandRed.withOpacity(0.2)),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                hasRelevant ? 'Jobs For You' : 'Job Opportunities',
+                style: GoogleFonts.cormorantGaramond(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w500,
+                    fontStyle: FontStyle.italic),
               ),
-              child: Row(children: [
-                Text('VIEW ALL',
+              if (userCourse.isNotEmpty && hasRelevant)
+                Text('Matched to your course & experience',
                     style: GoogleFonts.inter(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.5,
-                        color: AppColors.brandRed)),
-                const SizedBox(width: 4),
-                const Icon(Icons.arrow_forward, size: 11, color: AppColors.brandRed),
-              ]),
+                        fontSize: 10,
+                        color: AppColors.mutedText,
+                        fontStyle: FontStyle.italic)),
+            ]),
+            GestureDetector(
+              onTap: _goToJobs,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.brandRed.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: AppColors.brandRed.withOpacity(0.2)),
+                ),
+                child: Row(children: [
+                  Text('VIEW ALL',
+                      style: GoogleFonts.inter(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.5,
+                          color: AppColors.brandRed)),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.arrow_forward,
+                      size: 11, color: AppColors.brandRed),
+                ]),
+              ),
             ),
+          ],
+        ),
+        const SizedBox(height: 16),
+
+        if (userCourse.isNotEmpty && hasRelevant) ...[
+          Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.brandRed.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                  color: AppColors.brandRed.withOpacity(0.15)),
+            ),
+            child: Row(children: [
+              const Icon(Icons.auto_awesome,
+                  size: 13, color: AppColors.brandRed),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Showing jobs matched to your course ($userCourse)'
+                  '${userOccupation.isNotEmpty ? ' and experience as $userOccupation' : ''}.',
+                  style: GoogleFonts.inter(
+                      fontSize: 11,
+                      color: AppColors.brandRed,
+                      height: 1.4),
+                ),
+              ),
+            ]),
           ),
         ],
-      ),
-      const SizedBox(height: 16),
 
-      // ── Course match info banner ──
-      if (userCourse.isNotEmpty && hasRelevant) ...[
-        Container(
-          margin: const EdgeInsets.only(bottom: 14),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: AppColors.brandRed.withOpacity(0.05),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.brandRed.withOpacity(0.15)),
-          ),
-          child: Row(children: [
-            const Icon(Icons.auto_awesome, size: 13, color: AppColors.brandRed),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Showing jobs matched to your course ($userCourse)'
-                '${userOccupation.isNotEmpty ? ' and experience as $userOccupation' : ''}.',
-                style: GoogleFonts.inter(
-                    fontSize: 11, color: AppColors.brandRed, height: 1.4),
-              ),
+        if (recentOpportunities.isEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            alignment: Alignment.center,
+            child: Column(children: [
+              Icon(Icons.work_off_outlined,
+                  size: 40, color: Colors.grey.shade300),
+              const SizedBox(height: 8),
+              Text('No approved job postings yet.',
+                  style: GoogleFonts.inter(
+                      color: AppColors.mutedText,
+                      fontSize: 13,
+                      fontStyle: FontStyle.italic)),
+            ]),
+          )
+        else
+          ...recentOpportunities.map(_opportunityCard),
+
+        const SizedBox(height: 4),
+        GestureDetector(
+          onTap: _goToJobs,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.borderSubtle),
             ),
-          ]),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.work_outline,
+                    size: 14, color: AppColors.brandRed),
+                const SizedBox(width: 8),
+                Text('Browse All Job Opportunities',
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.brandRed)),
+                const SizedBox(width: 6),
+                const Icon(Icons.arrow_forward_rounded,
+                    size: 13, color: AppColors.brandRed),
+              ],
+            ),
+          ),
         ),
       ],
-
-      if (recentOpportunities.isEmpty)
-        Container(
-          padding: const EdgeInsets.symmetric(vertical: 24),
-          alignment: Alignment.center,
-          child: Column(children: [
-            Icon(Icons.work_off_outlined,
-                size: 40, color: Colors.grey.shade300),
-            const SizedBox(height: 8),
-            Text('No approved job postings yet.',
-                style: GoogleFonts.inter(
-                    color: AppColors.mutedText,
-                    fontSize: 13,
-                    fontStyle: FontStyle.italic)),
-          ]),
-        )
-      else
-        ...recentOpportunities.map(_opportunityCard),
-
-      // ── Browse all button ──
-      const SizedBox(height: 4),
-      GestureDetector(
-        onTap: _goToJobs,
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.borderSubtle),
-          ),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const Icon(Icons.work_outline, size: 14, color: AppColors.brandRed),
-            const SizedBox(width: 8),
-            Text('Browse All Job Opportunities',
-                style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.brandRed)),
-            const SizedBox(width: 6),
-            const Icon(Icons.arrow_forward_rounded,
-                size: 13, color: AppColors.brandRed),
-          ]),
-        ),
-      ),
-    ]);
+    );
   }
 
   Widget _opportunityCard(Map<String, dynamic> op) {
@@ -1278,14 +1429,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (isRelevant)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 6),
               decoration: BoxDecoration(
                 color: AppColors.brandRed.withOpacity(0.06),
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(13)),
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(13)),
               ),
               child: Row(children: [
-                const Icon(Icons.auto_awesome, size: 12, color: AppColors.brandRed),
+                const Icon(Icons.auto_awesome,
+                    size: 12, color: AppColors.brandRed),
                 const SizedBox(width: 6),
                 Text(label,
                     style: GoogleFonts.inter(
@@ -1309,50 +1462,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 child: Icon(Icons.work_outline,
                     size: 20,
-                    color: isRelevant ? AppColors.brandRed : AppColors.mutedText),
+                    color: isRelevant
+                        ? AppColors.brandRed
+                        : AppColors.mutedText),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(op['title'].toString(),
-                      style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.darkText),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 2),
-                  Text(op['company'].toString(),
-                      style: GoogleFonts.inter(
-                          fontSize: 12, color: AppColors.mutedText),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 6),
-                  Row(children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.softWhite,
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: AppColors.borderSubtle),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(op['title'].toString(),
+                        style: GoogleFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.darkText),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 2),
+                    Text(op['company'].toString(),
+                        style: GoogleFonts.inter(
+                            fontSize: 12, color: AppColors.mutedText),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 6),
+                    Row(children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.softWhite,
+                          borderRadius: BorderRadius.circular(4),
+                          border:
+                              Border.all(color: AppColors.borderSubtle),
+                        ),
+                        child: Text(op['type'].toString(),
+                            style: GoogleFonts.inter(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.mutedText)),
                       ),
-                      child: Text(op['type'].toString(),
-                          style: GoogleFonts.inter(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.mutedText)),
-                    ),
-                    const SizedBox(width: 6),
-                    const Icon(Icons.location_on_outlined,
-                        size: 10, color: AppColors.mutedText),
-                    const SizedBox(width: 2),
-                    Expanded(
-                      child: Text(op['location'].toString(),
-                          style: GoogleFonts.inter(
-                              fontSize: 10, color: AppColors.mutedText),
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                    ),
-                  ]),
-                ]),
+                      const SizedBox(width: 6),
+                      const Icon(Icons.location_on_outlined,
+                          size: 10, color: AppColors.mutedText),
+                      const SizedBox(width: 2),
+                      Expanded(
+                        child: Text(op['location'].toString(),
+                            style: GoogleFonts.inter(
+                                fontSize: 10,
+                                color: AppColors.mutedText),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                    ]),
+                  ],
+                ),
               ),
               const Icon(Icons.chevron_right,
                   color: AppColors.mutedText, size: 18),
@@ -1363,7 +1526,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ─── Alumni network section ───────────────────────────────────────────────
   Widget _buildAlumniNetworkSection(String currentUid) {
     final hasSameBatchAndCourse =
         nearbyAlumni.any((a) => (a['score'] as int? ?? 0) >= 90);
@@ -1372,34 +1534,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     String subtitle = 'People you may know';
     if (hasSameBatchAndCourse) {
-      subtitle = 'From your batch & ${userCourse.isNotEmpty ? userCourse : 'course'}';
+      subtitle =
+          'From your batch & ${userCourse.isNotEmpty ? userCourse : 'course'}';
     } else if (hasSameBatch && userBatch.isNotEmpty) {
       subtitle = 'From Batch $userBatch';
     }
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _sectionHeader('Alumni You May Know', 'SEE ALL',
-          onTap: () => Navigator.pushNamed(context, '/friends')),
-      const SizedBox(height: 4),
-      Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Text(subtitle,
-            style: GoogleFonts.inter(
-                fontSize: 11,
-                color: AppColors.mutedText,
-                fontStyle: FontStyle.italic)),
-      ),
-      SizedBox(
-        height: 240,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: nearbyAlumni.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 12),
-          itemBuilder: (_, i) =>
-              _alumniNetworkCard(nearbyAlumni[i], currentUid),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader('Alumni You May Know', 'SEE ALL',
+            onTap: () => Navigator.pushNamed(context, '/friends')),
+        const SizedBox(height: 4),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text(subtitle,
+              style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: AppColors.mutedText,
+                  fontStyle: FontStyle.italic)),
         ),
-      ),
-    ]);
+        SizedBox(
+          height: 240,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: nearbyAlumni.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (_, i) =>
+                _alumniNetworkCard(nearbyAlumni[i], currentUid),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _alumniNetworkCard(
@@ -1433,7 +1599,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           boxShadow: [
             BoxShadow(
                 color: Colors.black.withOpacity(0.03),
-                blurRadius: 6, offset: const Offset(0, 2)),
+                blurRadius: 6,
+                offset: const Offset(0, 2)),
           ],
         ),
         child: Column(children: [
@@ -1445,10 +1612,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: CachedNetworkImage(
                       imageUrl: avatarUrl,
                       fit: BoxFit.cover,
-                      width: 56, height: 56,
+                      width: 56,
+                      height: 56,
                       errorWidget: (_, __, ___) => const Icon(
                           Icons.person,
-                          color: AppColors.brandRed, size: 26),
+                          color: AppColors.brandRed,
+                          size: 26),
                     ),
                   )
                 : Text(
@@ -1479,7 +1648,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ? AppColors.brandRed
                           : Colors.blue.shade700,
                       letterSpacing: 0.2),
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
             ),
           Text(name,
               style: GoogleFonts.inter(
@@ -1487,14 +1657,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   fontWeight: FontWeight.w700,
                   color: AppColors.darkText),
               textAlign: TextAlign.center,
-              maxLines: 2, overflow: TextOverflow.ellipsis),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis),
           if (headline.isNotEmpty) ...[
             const SizedBox(height: 3),
             Text(headline,
                 style: GoogleFonts.inter(
                     fontSize: 10, color: AppColors.mutedText),
                 textAlign: TextAlign.center,
-                maxLines: 2, overflow: TextOverflow.ellipsis),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis),
           ],
           if (batch.isNotEmpty) ...[
             const SizedBox(height: 4),
@@ -1547,8 +1719,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 color: Colors.green,
                                 fontWeight: FontWeight.w700)),
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.green),
-                          padding: const EdgeInsets.symmetric(vertical: 5),
+                          side:
+                              const BorderSide(color: Colors.green),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 5),
                           minimumSize: Size.zero,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8)),
@@ -1590,7 +1764,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           backgroundColor: AppColors.brandRed,
                           foregroundColor: Colors.white,
                           elevation: 0,
-                          padding: const EdgeInsets.symmetric(vertical: 5),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 5),
                           minimumSize: Size.zero,
                           tapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,
@@ -1612,7 +1787,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           foregroundColor: AppColors.mutedText,
                           side: const BorderSide(
                               color: AppColors.borderSubtle),
-                          padding: const EdgeInsets.symmetric(vertical: 5),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 5),
                           minimumSize: Size.zero,
                           tapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,
@@ -1636,7 +1812,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // ─── Drawer ───────────────────────────────────────────────────────────────
-  Widget _buildDrawer() {
+  Widget _buildDrawer(String currentUid) {
     return Drawer(
       backgroundColor: Colors.white,
       elevation: 0,
@@ -1651,102 +1827,124 @@ class _DashboardScreenState extends State<DashboardScreen> {
             CircleAvatar(
               radius: 28,
               backgroundColor: AppColors.borderSubtle,
-              backgroundImage: userPhotoUrl != null &&
-                      userPhotoUrl!.isNotEmpty
-                  ? NetworkImage(userPhotoUrl!)
-                  : null,
-              child: userPhotoUrl == null || userPhotoUrl!.isEmpty
-                  ? Text(
-                      userName.isNotEmpty
-                          ? userName[0].toUpperCase()
-                          : '?',
-                      style: GoogleFonts.cormorantGaramond(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.brandRed),
-                    )
-                  : null,
+              backgroundImage:
+                  userPhotoUrl != null && userPhotoUrl!.isNotEmpty
+                      ? NetworkImage(userPhotoUrl!)
+                      : null,
+              child:
+                  userPhotoUrl == null || userPhotoUrl!.isEmpty
+                      ? Text(
+                          userName.isNotEmpty
+                              ? userName[0].toUpperCase()
+                              : '?',
+                          style: GoogleFonts.cormorantGaramond(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.brandRed),
+                        )
+                      : null,
             ),
             const SizedBox(width: 16),
             Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(userName,
-                    style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.darkText),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 2),
-                Row(children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: AppColors.brandRed.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      userRole.toUpperCase(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(userName,
                       style: GoogleFonts.inter(
-                          fontSize: 9,
+                          fontSize: 14,
                           fontWeight: FontWeight.w700,
-                          color: AppColors.brandRed,
-                          letterSpacing: 0.5),
+                          color: AppColors.darkText),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Row(children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.brandRed.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        userRole.toUpperCase(),
+                        style: GoogleFonts.inter(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.brandRed,
+                            letterSpacing: 0.5),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  Container(
-                    width: 8, height: 8,
-                    decoration: BoxDecoration(
-                      color: isVerified
-                          ? Colors.green
-                          : isRejected
-                              ? Colors.red
-                              : Colors.orange,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    isVerified
-                        ? 'Verified'
-                        : isRejected
-                            ? 'Rejected'
-                            : 'Pending',
-                    style: GoogleFonts.inter(
-                        fontSize: 9,
+                    const SizedBox(width: 6),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
                         color: isVerified
                             ? Colors.green
                             : isRejected
                                 ? Colors.red
                                 : Colors.orange,
-                        fontWeight: FontWeight.w600),
-                  ),
-                ]),
-              ]),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      isVerified
+                          ? 'Verified'
+                          : isRejected
+                              ? 'Rejected'
+                              : 'Pending',
+                      style: GoogleFonts.inter(
+                          fontSize: 9,
+                          color: isVerified
+                              ? Colors.green
+                              : isRejected
+                                  ? Colors.red
+                                  : Colors.orange,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ]),
+                ],
+              ),
             ),
           ]),
         ),
         Expanded(
           child: ListView(padding: EdgeInsets.zero, children: [
             const SizedBox(height: 8),
-            _drawerTile(Icons.dashboard_outlined, 'Dashboard', active: true),
-            _drawerTile(Icons.person_outline,     'My Profile',      route: '/profile'),
-            _drawerTile(Icons.forum_outlined,     'Discussions',     route: '/discussions'),
-            _drawerTile(Icons.event_available_outlined, 'Events',    route: '/events'),
-            _drawerTile(Icons.campaign_outlined,  'Announcements',   route: '/announcements'),
-            _drawerTile(Icons.work_outline,       'Job Opportunities', onTap: _goToJobs),
-            _drawerTile(Icons.photo_library_outlined, 'Gallery',     route: '/gallery'),
-            _drawerTile(Icons.message_outlined,   'Messages',        route: '/messages'),
-            _drawerTile(Icons.people_outline,     'Friends & Network', route: '/friends'),
+            _drawerTile(Icons.dashboard_outlined, 'Dashboard',
+                active: true),
+            _drawerTile(Icons.person_outline, 'My Profile',
+                route: '/profile'),
+            _drawerTile(Icons.forum_outlined, 'Discussions',
+                route: '/discussions'),
+            _drawerTile(
+                Icons.event_available_outlined, 'Events',
+                route: '/events'),
+            _drawerTile(Icons.campaign_outlined, 'Announcements',
+                route: '/announcements'),
+            _drawerTile(Icons.work_outline, 'Job Opportunities',
+                onTap: _goToJobs),
+            _drawerTile(
+                Icons.photo_library_outlined, 'Gallery',
+                route: '/gallery'),
+            _drawerTile(Icons.message_outlined, 'Messages',
+                route: '/messages'),
+            _drawerTile(Icons.people_outline, 'Friends & Network',
+                route: '/friends'),
             _drawerTile(
               Icons.notifications_outlined,
               'Notifications',
-              onTap: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const NotificationsScreen())),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const NotificationsScreen()),
+              ),
               trailing: StreamBuilder<int>(
-                stream: NotificationService.unreadCountStream(
-                    FirebaseAuth.instance.currentUser?.uid ?? ''),
+                stream: currentUid.isNotEmpty
+                    ? NotificationService.totalBadgeCountStream(
+                        currentUid)
+                    : Stream.value(0),
                 builder: (_, snap) {
                   final count = snap.data ?? 0;
                   if (count == 0) return const SizedBox();
@@ -1756,19 +1954,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     decoration: BoxDecoration(
                         color: AppColors.brandRed,
                         borderRadius: BorderRadius.circular(10)),
-                    child: Text(count > 99 ? '99+' : '$count',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold)),
+                    child: Text(
+                      count > 99 ? '99+' : '$count',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold),
+                    ),
                   );
                 },
               ),
             ),
             if (isAdmin) ...[
-              const Divider(height: 24, indent: 24, endIndent: 24),
+              const Divider(
+                  height: 24, indent: 24, endIndent: 24),
               Padding(
-                padding: const EdgeInsets.fromLTRB(24, 4, 24, 8),
+                padding:
+                    const EdgeInsets.fromLTRB(24, 4, 24, 8),
                 child: Text('ADMIN',
                     style: GoogleFonts.inter(
                         fontSize: 10,
@@ -1776,17 +1978,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         letterSpacing: 1.2,
                         color: AppColors.mutedText)),
               ),
-              _drawerTile(Icons.work_outline,           'Job Board Management',   route: '/job_board_management'),
-              _drawerTile(Icons.bar_chart_outlined,     'Growth Metrics',          route: '/growth_metrics'),
-              _drawerTile(Icons.verified_user_outlined, 'User Verification',       route: '/user_verification_moderation'),
-              _drawerTile(Icons.event_note_outlined,    'Event Planning',          route: '/event_planning'),
-              _drawerTile(Icons.campaign_outlined,      'Announcements Mgmt',      route: '/announcement_management'),
+              _drawerTile(Icons.work_outline,
+                  'Job Board Management',
+                  route: '/job_board_management'),
+              _drawerTile(
+                  Icons.bar_chart_outlined, 'Growth Metrics',
+                  route: '/growth_metrics'),
+              _drawerTile(Icons.verified_user_outlined,
+                  'User Verification',
+                  route: '/user_verification_moderation'),
+              _drawerTile(Icons.event_note_outlined,
+                  'Event Planning',
+                  route: '/event_planning'),
+              _drawerTile(Icons.campaign_outlined,
+                  'Announcements Mgmt',
+                  route: '/announcement_management'),
             ],
           ]),
         ),
         const Divider(color: Color(0xFFE5E7EB), height: 1),
-        _drawerTile(Icons.settings_outlined, 'Settings', route: '/settings'),
-        _drawerTile(Icons.logout, 'Logout', isDestructive: true, onTap: _logout),
+        _drawerTile(Icons.settings_outlined, 'Settings',
+            route: '/settings'),
+        _drawerTile(Icons.logout, 'Logout',
+            isDestructive: true, onTap: _logout),
         const SizedBox(height: 32),
       ]),
     );
@@ -1810,7 +2024,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       leading: Container(
         width: 32, height: 32,
         decoration: BoxDecoration(
-          color: active ? AppColors.brandRed.withOpacity(0.1) : Colors.transparent,
+          color: active
+              ? AppColors.brandRed.withOpacity(0.1)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(icon,
@@ -1820,12 +2036,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       title: Text(title,
           style: GoogleFonts.inter(
               fontSize: 13,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              fontWeight:
+                  active ? FontWeight.w700 : FontWeight.w500,
               color: color)),
       trailing: trailing,
       selected: active,
       selectedTileColor: AppColors.brandRed.withOpacity(0.05),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8)),
       onTap: () {
         Navigator.pop(context);
         if (onTap != null) {
@@ -1840,7 +2058,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // ─── UI helpers ───────────────────────────────────────────────────────────
   Widget _buildBadge(IconData icon, String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(
+          horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border.all(color: AppColors.borderSubtle),
@@ -1859,7 +2078,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildActionCircle(
-    String label, IconData icon, VoidCallback onTap, {int badge = 0}) {
+    String label,
+    IconData icon,
+    VoidCallback onTap, {
+    int badge = 0,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(right: 28),
       child: GestureDetector(
@@ -1870,10 +2093,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               width: 54, height: 54,
               decoration: BoxDecoration(
                 color: Colors.white,
-                border: Border.all(color: AppColors.borderSubtle),
+                border:
+                    Border.all(color: AppColors.borderSubtle),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: Icon(icon, color: AppColors.darkText, size: 22),
+              child: Icon(icon,
+                  color: AppColors.darkText, size: 22),
             ),
             if (badge > 0)
               Positioned(
@@ -1881,12 +2106,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Container(
                   padding: const EdgeInsets.all(5),
                   decoration: const BoxDecoration(
-                      color: AppColors.brandRed, shape: BoxShape.circle),
-                  child: Text(badge > 99 ? '99+' : '$badge',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 8,
-                          fontWeight: FontWeight.bold)),
+                      color: AppColors.brandRed,
+                      shape: BoxShape.circle),
+                  child: Text(
+                    badge > 99 ? '99+' : '$badge',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 8,
+                        fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
           ]),
@@ -1901,9 +2129,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-
-
-  Widget _sectionHeader(String title, String action, {VoidCallback? onTap}) {
+  Widget _sectionHeader(String title, String action,
+      {VoidCallback? onTap}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -1929,7 +2156,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  _FriendRequestsBanner — unchanged from original
+//  _FriendRequestsBanner
 // ═══════════════════════════════════════════════════════════════════════════
 class _FriendRequestsBanner extends StatelessWidget {
   final String currentUid;
@@ -1937,6 +2164,7 @@ class _FriendRequestsBanner extends StatelessWidget {
 
   Future<void> _accept(BuildContext context,
       String fromUid, String requestId) async {
+    if (fromUid.trim().isEmpty || requestId.trim().isEmpty) return;
     try {
       final now = FieldValue.serverTimestamp();
       final db  = FirebaseFirestore.instance;
@@ -1944,13 +2172,10 @@ class _FriendRequestsBanner extends StatelessWidget {
       await db.collection('users').doc(currentUid)
           .collection('connections').doc(fromUid)
           .set({'connectedAt': now, 'uid': fromUid});
-
       await db.collection('users').doc(fromUid)
           .collection('connections').doc(currentUid)
           .set({'connectedAt': now, 'uid': currentUid});
-
       await db.collection('friend_requests').doc(requestId).delete();
-
       await db.collection('users').doc(currentUid)
           .set({'connectionsCount': FieldValue.increment(1)},
               SetOptions(merge: true));
@@ -1958,12 +2183,17 @@ class _FriendRequestsBanner extends StatelessWidget {
           .set({'connectionsCount': FieldValue.increment(1)},
               SetOptions(merge: true));
 
-      final meDoc = await db.collection('users').doc(currentUid).get();
+      final meDoc =
+          await db.collection('users').doc(currentUid).get();
       final acceptorName =
-          meDoc.data()?['name']?.toString() ?? 'Someone';
+          meDoc.data()?['name']?.toString().trim().isNotEmpty == true
+              ? meDoc.data()!['name'].toString().trim()
+              : 'Someone';
 
       await NotificationService.sendFriendAcceptedNotification(
-        toUid: fromUid, acceptorName: acceptorName, acceptorUid: currentUid,
+        toUid:        fromUid,
+        acceptorName: acceptorName,
+        acceptorUid:  currentUid,
       );
 
       if (context.mounted) {
@@ -1980,7 +2210,9 @@ class _FriendRequestsBanner extends StatelessWidget {
     }
   }
 
-  Future<void> _decline(BuildContext context, String requestId) async {
+  Future<void> _decline(
+      BuildContext context, String requestId) async {
+    if (requestId.trim().isEmpty) return;
     try {
       await FirebaseFirestore.instance
           .collection('friend_requests')
@@ -1989,13 +2221,16 @@ class _FriendRequestsBanner extends StatelessWidget {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Error: $e'), backgroundColor: Colors.red));
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red));
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (currentUid.isEmpty) return const SizedBox.shrink();
+
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('friend_requests')
@@ -2009,84 +2244,95 @@ class _FriendRequestsBanner extends StatelessWidget {
 
         final requests = snapshot.data!.docs;
 
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Text('Friend Requests',
-                style: GoogleFonts.cormorantGaramond(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w500,
-                    fontStyle: FontStyle.italic)),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                  color: AppColors.brandRed,
-                  borderRadius: BorderRadius.circular(12)),
-              child: Text('${requests.length}',
-                  style: const TextStyle(
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Text('Friend Requests',
+                  style: GoogleFonts.cormorantGaramond(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w500,
+                      fontStyle: FontStyle.italic)),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                    color: AppColors.brandRed,
+                    borderRadius: BorderRadius.circular(12)),
+                child: Text('${requests.length}',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold)),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            ...requests.map((doc) {
+              final data    = doc.data() as Map<String, dynamic>;
+              final fromUid = data['fromUid']?.toString() ?? '';
+              if (fromUid.isEmpty) return const SizedBox.shrink();
+
+              return FutureBuilder<DocumentSnapshot>(
+                future: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(fromUid)
+                    .get(),
+                builder: (context, userSnap) {
+                  if (!userSnap.hasData) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: LinearProgressIndicator(
+                          color: AppColors.brandRed),
+                    );
+                  }
+
+                  final user = userSnap.data!.data()
+                          as Map<String, dynamic>? ??
+                      {};
+                  final name      = user['name']?.toString()   ?? 'Unknown';
+                  final avatarUrl =
+                      user['profilePictureUrl']?.toString() ?? '';
+                  final headline =
+                      user['headline']?.toString().isNotEmpty == true
+                          ? user['headline'].toString()
+                          : user['role']?.toString() ?? '';
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
                       color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold)),
-            ),
-          ]),
-          const SizedBox(height: 12),
-          ...requests.map((doc) {
-            final data    = doc.data() as Map<String, dynamic>;
-            final fromUid = data['fromUid']?.toString() ?? '';
-
-            return FutureBuilder<DocumentSnapshot>(
-              future: FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(fromUid)
-                  .get(),
-              builder: (context, userSnap) {
-                if (!userSnap.hasData) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: LinearProgressIndicator(
-                        color: AppColors.brandRed),
-                  );
-                }
-
-                final user       = userSnap.data!.data()
-                        as Map<String, dynamic>? ?? {};
-                final name       = user['name']?.toString() ?? 'Unknown';
-                final avatarUrl  = user['profilePictureUrl']?.toString() ?? '';
-                final headline   = user['headline']?.toString().isNotEmpty == true
-                    ? user['headline'].toString()
-                    : user['role']?.toString() ?? '';
-
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.borderSubtle),
-                  ),
-                  child: Row(children: [
-                    GestureDetector(
-                      onTap: () => Navigator.push(context,
+                      borderRadius: BorderRadius.circular(12),
+                      border:
+                          Border.all(color: AppColors.borderSubtle),
+                    ),
+                    child: Row(children: [
+                      GestureDetector(
+                        onTap: () => Navigator.push(
+                          context,
                           MaterialPageRoute(
                               builder: (_) =>
-                                  AlumniPublicProfileScreen(uid: fromUid))),
-                      child: CircleAvatar(
-                        radius: 24,
-                        backgroundColor: AppColors.borderSubtle,
-                        backgroundImage: avatarUrl.isNotEmpty
-                            ? NetworkImage(avatarUrl)
-                            : null,
-                        child: avatarUrl.isEmpty
-                            ? const Icon(Icons.person,
-                                color: AppColors.brandRed)
-                            : null,
+                                  AlumniPublicProfileScreen(
+                                      uid: fromUid)),
+                        ),
+                        child: CircleAvatar(
+                          radius: 24,
+                          backgroundColor: AppColors.borderSubtle,
+                          backgroundImage: avatarUrl.isNotEmpty
+                              ? NetworkImage(avatarUrl)
+                              : null,
+                          child: avatarUrl.isEmpty
+                              ? const Icon(Icons.person,
+                                  color: AppColors.brandRed)
+                              : null,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
                           children: [
                             Text(name,
                                 style: GoogleFonts.inter(
@@ -2099,58 +2345,60 @@ class _FriendRequestsBanner extends StatelessWidget {
                                       color: AppColors.mutedText),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis),
-                          ]),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: () =>
-                          _accept(context, fromUid, doc.id),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.brandRed,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        minimumSize: Size.zero,
-                        tapTargetSize:
-                            MaterialTapTargetSize.shrinkWrap,
-                        shape: RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(8)),
+                          ],
+                        ),
                       ),
-                      child: Text('Accept',
-                          style: GoogleFonts.inter(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                    const SizedBox(width: 6),
-                    OutlinedButton(
-                      onPressed: () =>
-                          _decline(context, doc.id),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.mutedText,
-                        side: const BorderSide(
-                            color: AppColors.borderSubtle),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        minimumSize: Size.zero,
-                        tapTargetSize:
-                            MaterialTapTargetSize.shrinkWrap,
-                        shape: RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(8)),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () =>
+                            _accept(context, fromUid, doc.id),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.brandRed,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          minimumSize: Size.zero,
+                          tapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(8)),
+                        ),
+                        child: Text('Accept',
+                            style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600)),
                       ),
-                      child: Text('Decline',
-                          style: GoogleFonts.inter(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                  ]),
-                );
-              },
-            );
-          }),
-          const SizedBox(height: 48),
-        ]);
+                      const SizedBox(width: 6),
+                      OutlinedButton(
+                        onPressed: () =>
+                            _decline(context, doc.id),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.mutedText,
+                          side: const BorderSide(
+                              color: AppColors.borderSubtle),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          minimumSize: Size.zero,
+                          tapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(8)),
+                        ),
+                        child: Text('Decline',
+                            style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    ]),
+                  );
+                },
+              );
+            }),
+            const SizedBox(height: 48),
+          ],
+        );
       },
     );
   }

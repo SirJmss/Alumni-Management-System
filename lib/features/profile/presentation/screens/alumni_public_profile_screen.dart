@@ -1,7 +1,20 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// AlumniPublicProfileScreen
-// FILE: lib/features/profile/presentation/screens/alumni_public_profile_screen.dart
-// ─────────────────────────────────────────────────────────────────────────────
+// lib/features/profile/presentation/screens/alumni_public_profile_screen.dart
+//
+// FIXES APPLIED:
+//  1. _RelationshipWatcher: Replaced where() queries for pendingOut/pendingIn
+//     with direct document snapshot listeners using the known doc ID pattern
+//     (${fromUid}_${toUid}). This eliminates composite index requirements and
+//     ensures the watcher never stalls in "not ready" state.
+//  2. All connect/unfollow actions use Firestore Transactions so counts are
+//     always accurate even if the app crashes mid-write.
+//  3. _sendRequest: Checks for existing connection AND existing request inside
+//     a transaction to prevent duplicate requests.
+//  4. _acceptRequest: Fully transactional — reads request + existing connection
+//     + user counts atomically before any write.
+//  5. Count guards: All increments/decrements are bounded at 0 to prevent
+//     negative counts from partial writes.
+//  6. _unfriend / _unfollowUser: Check the sub-collection doc exists before
+//     decrementing so stale UI state can't cause double-decrements.
 
 import 'dart:async';
 
@@ -27,21 +40,18 @@ class _AlumniPublicProfileScreenState
   final _db = FirebaseFirestore.instance;
   late final String _currentUid;
 
-  bool _connectLoading = false;
-  bool _followLoading = false;
-  bool _isConnected = false;
-  bool _requestPending = false;
-  bool _requestReceived = false;
-  bool _isFollowing = false;
+  bool _connectLoading    = false;
+  bool _followLoading     = false;
+  bool _isConnected       = false;
+  bool _requestPending    = false;  // I sent a request to them
+  bool _requestReceived   = false;  // They sent a request to me
+  bool _isFollowing       = false;
   bool _relationshipReady = false;
 
-  // ─── Layout constants ──────────────────────────────────
-  static const double _coverHeight  = 220.0;
-  static const double _avatarRadius = 48.0;
-  static const double _avatarBorder = 4.0;
-  // Total avatar diameter + border on each side
-  static const double _avatarTotal  = (_avatarRadius + _avatarBorder) * 2;
-  // How much avatar hangs below cover
+  static const double _coverHeight   = 220.0;
+  static const double _avatarRadius  = 48.0;
+  static const double _avatarBorder  = 4.0;
+  static const double _avatarTotal   = (_avatarRadius + _avatarBorder) * 2;
   static const double _avatarOverlap = _avatarRadius + _avatarBorder;
 
   bool get _isOwnProfile =>
@@ -75,172 +85,238 @@ class _AlumniPublicProfileScreenState
       else if (_requestReceived) await _acceptRequest();
       else                       await _sendRequest();
     } catch (e) {
-      _showSnack(_friendlyError(e), Colors.red.shade700);
+      if (mounted) _showSnack(_friendlyError(e), Colors.red.shade700);
     } finally {
       if (mounted) setState(() => _connectLoading = false);
     }
   }
 
+  // ── Send request ──────────────────────────────────────
+  // FIX: Check everything inside a transaction to prevent race conditions.
   Future<void> _sendRequest() async {
-    final outSnap = await _db
+    final outReqRef = _db
         .collection('friend_requests')
-        .where('fromUid', isEqualTo: _currentUid)
-        .where('toUid',   isEqualTo: widget.uid)
-        .limit(1).get();
-    if (outSnap.docs.isNotEmpty) {
-      _showSnack('Request already sent.', Colors.orange.shade700); return;
-    }
-    final inSnap = await _db
+        .doc('${_currentUid}_${widget.uid}');
+    final inReqRef = _db
         .collection('friend_requests')
-        .where('fromUid', isEqualTo: widget.uid)
-        .where('toUid',   isEqualTo: _currentUid)
-        .limit(1).get();
-    if (inSnap.docs.isNotEmpty) {
-      _showSnack('They already sent you a request — accept it instead.',
-          Colors.orange.shade700); return;
-    }
-    final connDoc = await _db
-        .collection('users').doc(_currentUid)
-        .collection('connections').doc(widget.uid).get();
-    if (connDoc.exists) {
-      _showSnack('You are already connected.', Colors.green.shade700); return;
-    }
-    await _db.collection('friend_requests')
-        .doc('${_currentUid}_${widget.uid}').set({
-      'fromUid':   _currentUid,
-      'toUid':     widget.uid,
-      'status':    'pending',
-      'createdAt': FieldValue.serverTimestamp(),
+        .doc('${widget.uid}_${_currentUid}');
+    final connRef = _db
+        .collection('users')
+        .doc(_currentUid)
+        .collection('connections')
+        .doc(widget.uid);
+
+    await _db.runTransaction((tx) async {
+      final outReq = await tx.get(outReqRef);
+      final inReq  = await tx.get(inReqRef);
+      final conn   = await tx.get(connRef);
+
+      if (conn.exists) {
+        throw Exception('already_connected');
+      }
+      if (outReq.exists) {
+        throw Exception('already_sent');
+      }
+      if (inReq.exists) {
+        throw Exception('has_incoming');
+      }
+
+      tx.set(outReqRef, {
+        'fromUid':   _currentUid,
+        'toUid':     widget.uid,
+        'status':    'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
     });
+
     _showSnack('Connection request sent!', Colors.green.shade700);
   }
 
+  // ── Cancel outgoing request ───────────────────────────
   Future<void> _cancelRequest() async {
     final ok = await _confirm(
         title: 'Cancel Request',
         body: 'Withdraw your pending connection request?',
         confirmLabel: 'Withdraw');
     if (ok != true) return;
-    await _db.collection('friend_requests')
-        .doc('${_currentUid}_${widget.uid}').delete();
+
+    await _db
+        .collection('friend_requests')
+        .doc('${_currentUid}_${widget.uid}')
+        .delete();
     _showSnack('Request withdrawn', Colors.grey.shade700);
   }
 
+  // ── Accept incoming request ───────────────────────────
+  // FIX: Fully transactional. Uses direct doc ID — no where() query.
   Future<void> _acceptRequest() async {
-    final reqSnap = await _db
+    final reqRef       = _db
         .collection('friend_requests')
-        .where('fromUid', isEqualTo: widget.uid)
-        .where('toUid',   isEqualTo: _currentUid)
-        .limit(1).get();
-    if (reqSnap.docs.isEmpty) {
-      _showSnack('Request no longer available.', Colors.orange.shade700); return;
-    }
-    final reqDocId = reqSnap.docs.first.id;
-    final existingConn = await _db
+        .doc('${widget.uid}_${_currentUid}');
+    final myConnRef    = _db
         .collection('users').doc(_currentUid)
-        .collection('connections').doc(widget.uid).get();
-    if (existingConn.exists) {
-      await _db.collection('friend_requests').doc(reqDocId).delete();
-      _showSnack('Already connected!', Colors.green.shade700); return;
-    }
-    final now = FieldValue.serverTimestamp();
-    final wb  = _db.batch();
-    wb.set(_db.collection('users').doc(_currentUid)
-        .collection('connections').doc(widget.uid),
-        {'connectedAt': now, 'uid': widget.uid});
-    wb.set(_db.collection('users').doc(widget.uid)
-        .collection('connections').doc(_currentUid),
-        {'connectedAt': now, 'uid': _currentUid});
-    wb.delete(_db.collection('friend_requests').doc(reqDocId));
-    wb.update(_db.collection('users').doc(_currentUid),
-        {'connectionsCount': FieldValue.increment(1)});
-    wb.update(_db.collection('users').doc(widget.uid),
-        {'connectionsCount': FieldValue.increment(1)});
-    await wb.commit();
+        .collection('connections').doc(widget.uid);
+    final theirConnRef = _db
+        .collection('users').doc(widget.uid)
+        .collection('connections').doc(_currentUid);
+    final myUserRef    = _db.collection('users').doc(_currentUid);
+    final theirUserRef = _db.collection('users').doc(widget.uid);
+
+    await _db.runTransaction((tx) async {
+      final reqSnap      = await tx.get(reqRef);
+      final existingConn = await tx.get(myConnRef);
+      final myUser       = await tx.get(myUserRef);
+      final theirUser    = await tx.get(theirUserRef);
+
+      if (!reqSnap.exists) {
+        throw Exception('request_gone');
+      }
+      if (existingConn.exists) {
+        // Stale state — clean up the request silently
+        tx.delete(reqRef);
+        return;
+      }
+
+      final now = Timestamp.now();
+      tx.set(myConnRef, {'connectedAt': now, 'uid': widget.uid});
+      tx.set(theirConnRef, {'connectedAt': now, 'uid': _currentUid});
+      tx.delete(reqRef);
+
+      final myCount =
+          (myUser.data()?['connectionsCount'] as num?)?.toInt() ?? 0;
+      final theirCount =
+          (theirUser.data()?['connectionsCount'] as num?)?.toInt() ?? 0;
+      tx.update(myUserRef, {'connectionsCount': myCount + 1});
+      tx.update(theirUserRef, {'connectionsCount': theirCount + 1});
+    });
+
     _showSnack('Connected!', Colors.green.shade700);
   }
 
+  // ── Unfriend ──────────────────────────────────────────
+  // FIX: Fully transactional with existence check before decrement.
   Future<void> _unfriend() async {
     final ok = await _confirm(
         title: 'Remove Connection',
         body: "Remove this person from your connections? They won't be notified.",
         confirmLabel: 'Remove');
     if (ok != true) return;
-    final results = await Future.wait([
-      _db.collection('users').doc(_currentUid).get(),
-      _db.collection('users').doc(widget.uid).get(),
-    ]);
-    final myCount    = _safeInt(results[0].data()?['connectionsCount']);
-    final theirCount = _safeInt(results[1].data()?['connectionsCount']);
-    final wb = _db.batch();
-    wb.delete(_db.collection('users').doc(_currentUid)
-        .collection('connections').doc(widget.uid));
-    wb.delete(_db.collection('users').doc(widget.uid)
-        .collection('connections').doc(_currentUid));
-    if (myCount > 0)
-      wb.update(_db.collection('users').doc(_currentUid),
-          {'connectionsCount': FieldValue.increment(-1)});
-    if (theirCount > 0)
-      wb.update(_db.collection('users').doc(widget.uid),
-          {'connectionsCount': FieldValue.increment(-1)});
-    await wb.commit();
+
+    final myConnRef    = _db
+        .collection('users').doc(_currentUid)
+        .collection('connections').doc(widget.uid);
+    final theirConnRef = _db
+        .collection('users').doc(widget.uid)
+        .collection('connections').doc(_currentUid);
+    final myUserRef    = _db.collection('users').doc(_currentUid);
+    final theirUserRef = _db.collection('users').doc(widget.uid);
+
+    await _db.runTransaction((tx) async {
+      final myConn    = await tx.get(myConnRef);
+      final myUser    = await tx.get(myUserRef);
+      final theirUser = await tx.get(theirUserRef);
+
+      if (!myConn.exists) return; // already removed
+
+      tx.delete(myConnRef);
+      tx.delete(theirConnRef);
+
+      final myCount =
+          (myUser.data()?['connectionsCount'] as num?)?.toInt() ?? 0;
+      final theirCount =
+          (theirUser.data()?['connectionsCount'] as num?)?.toInt() ?? 0;
+
+      tx.update(myUserRef,
+          {'connectionsCount': myCount > 0 ? FieldValue.increment(-1) : 0});
+      tx.update(theirUserRef,
+          {'connectionsCount': theirCount > 0 ? FieldValue.increment(-1) : 0});
+    });
+
     _showSnack('Connection removed', Colors.grey.shade700);
   }
+
+  // ══════════════════════════════════════════════════════
+  //  FOLLOW ACTIONS
+  // ══════════════════════════════════════════════════════
 
   Future<void> _handleFollow() async {
     if (!_canAct('follow') || _followLoading) return;
     setState(() => _followLoading = true);
     try {
-      if (_isFollowing) await _unfollowUser(); else await _followUser();
+      if (_isFollowing) await _unfollowUser();
+      else              await _followUser();
     } catch (e) {
-      _showSnack(_friendlyError(e), Colors.red.shade700);
+      if (mounted) _showSnack(_friendlyError(e), Colors.red.shade700);
     } finally {
       if (mounted) setState(() => _followLoading = false);
     }
   }
 
+  // FIX: Transactional follow to prevent duplicate writes.
   Future<void> _followUser() async {
-    final existing = await _db
+    final myFollowRef  = _db
         .collection('users').doc(_currentUid)
-        .collection('following').doc(widget.uid).get();
-    if (existing.exists) {
-      _showSnack('Already following.', Colors.orange.shade700); return;
-    }
-    final now = FieldValue.serverTimestamp();
-    final wb  = _db.batch();
-    wb.set(_db.collection('users').doc(_currentUid)
-        .collection('following').doc(widget.uid),
-        {'followedAt': now, 'uid': widget.uid});
-    wb.set(_db.collection('users').doc(widget.uid)
-        .collection('followers').doc(_currentUid),
-        {'followedAt': now, 'uid': _currentUid});
-    wb.update(_db.collection('users').doc(_currentUid),
-        {'followingCount': FieldValue.increment(1)});
-    wb.update(_db.collection('users').doc(widget.uid),
-        {'followersCount': FieldValue.increment(1)});
-    await wb.commit();
+        .collection('following').doc(widget.uid);
+    final theirFollRef = _db
+        .collection('users').doc(widget.uid)
+        .collection('followers').doc(_currentUid);
+    final myUserRef    = _db.collection('users').doc(_currentUid);
+    final theirUserRef = _db.collection('users').doc(widget.uid);
+
+    await _db.runTransaction((tx) async {
+      final existing = await tx.get(myFollowRef);
+      if (existing.exists) throw Exception('already_following');
+
+      final myUser    = await tx.get(myUserRef);
+      final theirUser = await tx.get(theirUserRef);
+
+      final now = Timestamp.now();
+      tx.set(myFollowRef, {'followedAt': now, 'uid': widget.uid});
+      tx.set(theirFollRef, {'followedAt': now, 'uid': _currentUid});
+
+      final myFollowing =
+          (myUser.data()?['followingCount'] as num?)?.toInt() ?? 0;
+      final theirFollowers =
+          (theirUser.data()?['followersCount'] as num?)?.toInt() ?? 0;
+      tx.update(myUserRef, {'followingCount': myFollowing + 1});
+      tx.update(theirUserRef, {'followersCount': theirFollowers + 1});
+    });
+
     _showSnack('Following!', Colors.green.shade700);
   }
 
+  // FIX: Transactional unfollow with existence check.
   Future<void> _unfollowUser() async {
-    final results = await Future.wait([
-      _db.collection('users').doc(_currentUid).get(),
-      _db.collection('users').doc(widget.uid).get(),
-    ]);
-    final myFollowingCount    = _safeInt(results[0].data()?['followingCount']);
-    final theirFollowersCount = _safeInt(results[1].data()?['followersCount']);
-    final wb = _db.batch();
-    wb.delete(_db.collection('users').doc(_currentUid)
-        .collection('following').doc(widget.uid));
-    wb.delete(_db.collection('users').doc(widget.uid)
-        .collection('followers').doc(_currentUid));
-    if (myFollowingCount > 0)
-      wb.update(_db.collection('users').doc(_currentUid),
-          {'followingCount': FieldValue.increment(-1)});
-    if (theirFollowersCount > 0)
-      wb.update(_db.collection('users').doc(widget.uid),
-          {'followersCount': FieldValue.increment(-1)});
-    await wb.commit();
+    final myFollowRef  = _db
+        .collection('users').doc(_currentUid)
+        .collection('following').doc(widget.uid);
+    final theirFollRef = _db
+        .collection('users').doc(widget.uid)
+        .collection('followers').doc(_currentUid);
+    final myUserRef    = _db.collection('users').doc(_currentUid);
+    final theirUserRef = _db.collection('users').doc(widget.uid);
+
+    await _db.runTransaction((tx) async {
+      final followDoc = await tx.get(myFollowRef);
+      if (!followDoc.exists) return; // already unfollowed
+
+      final myUser    = await tx.get(myUserRef);
+      final theirUser = await tx.get(theirUserRef);
+
+      tx.delete(myFollowRef);
+      tx.delete(theirFollRef);
+
+      final myFollowing =
+          (myUser.data()?['followingCount'] as num?)?.toInt() ?? 0;
+      final theirFollowers =
+          (theirUser.data()?['followersCount'] as num?)?.toInt() ?? 0;
+
+      tx.update(myUserRef,
+          {'followingCount': myFollowing > 0 ? FieldValue.increment(-1) : 0});
+      tx.update(theirUserRef,
+          {'followersCount': theirFollowers > 0 ? FieldValue.increment(-1) : 0});
+    });
+
     _showSnack('Unfollowed', Colors.grey.shade700);
   }
 
@@ -273,73 +349,83 @@ class _AlumniPublicProfileScreenState
         content: Container(
           width: 320,
           padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 48, height: 48,
-                decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
-                    shape: BoxShape.circle),
-                child: const Icon(Icons.warning_amber_rounded,
-                    color: Colors.red, size: 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.08), shape: BoxShape.circle),
+              child: const Icon(Icons.warning_amber_rounded,
+                  color: Colors.red, size: 24),
+            ),
+            const SizedBox(height: 14),
+            Text(title,
+                style: GoogleFonts.cormorantGaramond(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.darkText)),
+            const SizedBox(height: 8),
+            Text(body,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: AppColors.mutedText,
+                    height: 1.5)),
+            const SizedBox(height: 20),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.borderSubtle),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                  ),
+                  child: Text('Cancel',
+                      style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.mutedText)),
+                ),
               ),
-              const SizedBox(height: 14),
-              Text(title,
-                  style: GoogleFonts.cormorantGaramond(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.darkText)),
-              const SizedBox(height: 8),
-              Text(body,
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.inter(
-                      fontSize: 13,
-                      color: AppColors.mutedText,
-                      height: 1.5)),
-              const SizedBox(height: 20),
-              Row(children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context, false),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.borderSubtle),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                    ),
-                    child: Text('Cancel',
-                        style: GoogleFonts.inter(
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.mutedText)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(vertical: 11),
                   ),
+                  child: Text(confirmLabel,
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(context, true),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                    ),
-                    child: Text(confirmLabel,
-                        style:
-                            GoogleFonts.inter(fontWeight: FontWeight.w600)),
-                  ),
-                ),
-              ]),
-            ],
-          ),
+              ),
+            ]),
+          ]),
         ),
       ),
     );
   }
 
   String _friendlyError(Object e) {
+    // Surface the intent-specific exceptions first
+    if (e is Exception) {
+      final msg = e.toString();
+      if (msg.contains('already_connected'))
+        return 'You are already connected.';
+      if (msg.contains('already_sent'))
+        return 'You already sent a request.';
+      if (msg.contains('has_incoming'))
+        return 'They already sent you a request — accept it instead.';
+      if (msg.contains('request_gone'))
+        return 'Request no longer available.';
+      if (msg.contains('already_following'))
+        return 'You are already following this person.';
+    }
     if (e is FirebaseException) {
       switch (e.code) {
         case 'permission-denied':
@@ -398,11 +484,11 @@ class _AlumniPublicProfileScreenState
               return _buildLoadingScaffold();
             if (!snapshot.hasData || !snapshot.data!.exists)
               return _buildNotFoundScaffold();
-            final data =
-                snapshot.data!.data() as Map<String, dynamic>? ?? {};
+            final data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
             return _buildProfileScaffold(data);
           },
         ),
+        // FIX: _RelationshipWatcher now uses only direct doc listeners
         _RelationshipWatcher(
           currentUid: _currentUid,
           otherUid: widget.uid,
@@ -415,10 +501,10 @@ class _AlumniPublicProfileScreenState
           }) {
             if (!mounted) return;
             setState(() {
-              _isConnected      = connected;
-              _requestPending   = pendingOut;
-              _requestReceived  = pendingIn;
-              _isFollowing      = following;
+              _isConnected       = connected;
+              _requestPending    = pendingOut;
+              _requestReceived   = pendingIn;
+              _isFollowing       = following;
               _relationshipReady = ready;
             });
           },
@@ -457,22 +543,16 @@ class _AlumniPublicProfileScreenState
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.cloud_off_outlined,
-                    size: 56, color: Colors.grey),
+                const Icon(Icons.cloud_off_outlined, size: 56, color: Colors.grey),
                 const SizedBox(height: 16),
                 Text('Could not load profile',
                     style: GoogleFonts.cormorantGaramond(
                         fontSize: 22, color: AppColors.darkText)),
                 const SizedBox(height: 8),
-                Text(
-                  error is FirebaseException &&
-                          error.code == 'permission-denied'
-                      ? 'Permission denied.\nEnsure your Firestore rules allow authenticated reads on /users/{userId}.'
-                      : _friendlyError(error ?? 'Unknown error'),
-                  style: GoogleFonts.inter(
-                      fontSize: 12, color: AppColors.mutedText),
-                  textAlign: TextAlign.center,
-                ),
+                Text(_friendlyError(error ?? 'Unknown error'),
+                    style: GoogleFonts.inter(
+                        fontSize: 12, color: AppColors.mutedText),
+                    textAlign: TextAlign.center),
               ],
             ),
           ),
@@ -486,8 +566,7 @@ class _AlumniPublicProfileScreenState
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.person_off_outlined,
-                  size: 64, color: Colors.grey),
+              const Icon(Icons.person_off_outlined, size: 64, color: Colors.grey),
               const SizedBox(height: 16),
               Text('Profile not found',
                   style: GoogleFonts.cormorantGaramond(
@@ -508,16 +587,13 @@ class _AlumniPublicProfileScreenState
   Widget _buildProfileScaffold(Map<String, dynamic> data) {
     final firstName = _s(data, 'firstName');
     final lastName  = _s(data, 'lastName');
-    final name = _s(data, 'name',
+    final name      = _s(data, 'name',
         fb: [firstName, lastName]
                 .where((s) => s.isNotEmpty)
                 .join(' ')
                 .trim()
                 .isNotEmpty
-            ? [firstName, lastName]
-                .where((s) => s.isNotEmpty)
-                .join(' ')
-                .trim()
+            ? [firstName, lastName].where((s) => s.isNotEmpty).join(' ').trim()
             : 'Unknown User');
 
     String resolveUrl(List<String> keys) {
@@ -539,8 +615,7 @@ class _AlumniPublicProfileScreenState
     final company    = _s(data, 'company', fb: '');
     final role       = _s(data, 'role', fb: '');
     final status     = _s(data, 'status', fb: '');
-    final phone =
-        _s(data, 'phone_number', fb: _s(data, 'phone', fb: ''));
+    final phone      = _s(data, 'phone_number', fb: _s(data, 'phone', fb: ''));
     final isVerified = status == 'active' ||
         _s(data, 'verificationStatus', fb: '') == 'verified';
 
@@ -584,7 +659,7 @@ class _AlumniPublicProfileScreenState
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
-          // ── Pinned AppBar ────────────────────────────
+          // ── Pinned AppBar ──────────────────────────
           SliverAppBar(
             pinned: true,
             backgroundColor: Colors.white,
@@ -599,22 +674,14 @@ class _AlumniPublicProfileScreenState
                 overflow: TextOverflow.ellipsis),
           ),
 
-          // ─────────────────────────────────────────────
-          // COVER + AVATAR — single Stack sliver
-          // Cover occupies _coverHeight.
-          // Avatar is Positioned so its TOP edge = cover bottom - full diameter,
-          // meaning it sits half-inside, half-outside the cover.
-          // The Stack's total height = coverHeight + avatarOverlap so the
-          // sliver reserves exactly the right amount of space.
-          // ─────────────────────────────────────────────
+          // ── Cover + Avatar ────────────────────────
           SliverToBoxAdapter(
             child: SizedBox(
-              // Reserve space: cover + the part of avatar below cover
               height: _coverHeight + _avatarOverlap,
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  // Cover photo
+                  // Cover
                   Positioned(
                     top: 0, left: 0, right: 0,
                     height: _coverHeight,
@@ -646,8 +713,6 @@ class _AlumniPublicProfileScreenState
                   ),
 
                   // Avatar + action buttons row
-                  // Top = coverHeight - avatarTotal  (avatar starts above cover bottom)
-                  // This centres the avatar ON the cover bottom edge
                   Positioned(
                     top: _coverHeight - _avatarTotal / 2,
                     left: 20,
@@ -699,7 +764,7 @@ class _AlumniPublicProfileScreenState
 
                         const Spacer(),
 
-                        // Action buttons — aligned to bottom of avatar
+                        // Action buttons
                         if (!_isOwnProfile)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 4),
@@ -712,9 +777,7 @@ class _AlumniPublicProfileScreenState
                                         color: AppColors.brandRed))
                                 : Row(children: [
                                     _ActionBtn(
-                                      label: _isFollowing
-                                          ? 'Following'
-                                          : 'Follow',
+                                      label: _isFollowing ? 'Following' : 'Follow',
                                       icon: _isFollowing
                                           ? Icons.notifications_active_rounded
                                           : Icons.notifications_none_rounded,
@@ -744,16 +807,14 @@ class _AlumniPublicProfileScreenState
             ),
           ),
 
-          // ─────────────────────────────────────────────
-          // CONTENT
-          // ─────────────────────────────────────────────
+          // ── Content ───────────────────────────────
           SliverToBoxAdapter(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 12),
 
-                // ── Name + badge ────────────────────────
+                // Name + badge
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
                   child: Column(
@@ -777,8 +838,7 @@ class _AlumniPublicProfileScreenState
                               color: AppColors.brandRed.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                  color:
-                                      AppColors.brandRed.withOpacity(0.3)),
+                                  color: AppColors.brandRed.withOpacity(0.3)),
                             ),
                             child: Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -802,8 +862,7 @@ class _AlumniPublicProfileScreenState
                             style: GoogleFonts.inter(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w500,
-                                color:
-                                    AppColors.darkText.withOpacity(0.75))),
+                                color: AppColors.darkText.withOpacity(0.75))),
                       ],
 
                       if (company.isNotEmpty || occupation.isNotEmpty) ...[
@@ -818,8 +877,7 @@ class _AlumniPublicProfileScreenState
                               if (company.isNotEmpty) company,
                             ].join(' · '),
                             style: GoogleFonts.inter(
-                                fontSize: 12,
-                                color: AppColors.mutedText),
+                                fontSize: 12, color: AppColors.mutedText),
                           ),
                         ]),
                       ],
@@ -828,25 +886,17 @@ class _AlumniPublicProfileScreenState
 
                       Wrap(spacing: 14, runSpacing: 6, children: [
                         if (location.isNotEmpty)
-                          _MetaBit(
-                              icon: Icons.location_on_outlined,
-                              text: location),
+                          _MetaBit(icon: Icons.location_on_outlined, text: location),
                         if (batch.isNotEmpty)
-                          _MetaBit(
-                              icon: Icons.school_outlined,
-                              text: 'Batch $batch'),
+                          _MetaBit(icon: Icons.school_outlined, text: 'Batch $batch'),
                         if (course.isNotEmpty)
-                          _MetaBit(
-                              icon: Icons.auto_stories_outlined,
-                              text: course),
+                          _MetaBit(icon: Icons.auto_stories_outlined, text: course),
                         if (role.isNotEmpty)
                           _MetaBit(
                               icon: Icons.badge_outlined,
-                              text: role[0].toUpperCase() +
-                                  role.substring(1)),
+                              text: role[0].toUpperCase() + role.substring(1)),
                         if (phone.isNotEmpty)
-                          _MetaBit(
-                              icon: Icons.phone_outlined, text: phone),
+                          _MetaBit(icon: Icons.phone_outlined, text: phone),
                       ]),
                     ],
                   ),
@@ -854,7 +904,7 @@ class _AlumniPublicProfileScreenState
 
                 const SizedBox(height: 18),
 
-                // ── Stats row ───────────────────────────
+                // Stats
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
                   child: Container(
@@ -870,8 +920,7 @@ class _AlumniPublicProfileScreenState
                       ],
                     ),
                     child: Row(children: [
-                      _StatCell(
-                          count: connectionsCount, label: 'Connections'),
+                      _StatCell(count: connectionsCount, label: 'Connections'),
                       _StatDivider(),
                       _StatCell(count: followersCount, label: 'Followers'),
                       _StatDivider(),
@@ -882,7 +931,7 @@ class _AlumniPublicProfileScreenState
 
                 const SizedBox(height: 20),
 
-                // ── About ───────────────────────────────
+                // About
                 if (about.isNotEmpty) ...[
                   _SectionCard(
                     title: 'About',
@@ -896,7 +945,7 @@ class _AlumniPublicProfileScreenState
                   const SizedBox(height: 12),
                 ],
 
-                // ── Experience ──────────────────────────
+                // Experience
                 if (experience.isNotEmpty) ...[
                   _SectionCard(
                     title: 'Experience',
@@ -907,8 +956,7 @@ class _AlumniPublicProfileScreenState
                           if (e.key > 0)
                             Divider(
                                 height: 24,
-                                color: AppColors.borderSubtle
-                                    .withOpacity(0.6)),
+                                color: AppColors.borderSubtle.withOpacity(0.6)),
                           _ExpItem(exp: e.value),
                         ]);
                       }).toList(),
@@ -917,7 +965,7 @@ class _AlumniPublicProfileScreenState
                   const SizedBox(height: 12),
                 ],
 
-                // ── Education ───────────────────────────
+                // Education
                 if (education.isNotEmpty) ...[
                   _SectionCard(
                     title: 'Education',
@@ -928,8 +976,7 @@ class _AlumniPublicProfileScreenState
                           if (e.key > 0)
                             Divider(
                                 height: 24,
-                                color: AppColors.borderSubtle
-                                    .withOpacity(0.6)),
+                                color: AppColors.borderSubtle.withOpacity(0.6)),
                           _EduItem(edu: e.value),
                         ]);
                       }).toList(),
@@ -938,7 +985,7 @@ class _AlumniPublicProfileScreenState
                   const SizedBox(height: 12),
                 ],
 
-                // ── Career Milestones ───────────────────
+                // Career Milestones
                 _CareerSection(uid: widget.uid),
 
                 const SizedBox(height: 48),
@@ -950,9 +997,7 @@ class _AlumniPublicProfileScreenState
     );
   }
 
-  // ── Static helpers ─────────────────────────────────────
-  static String _s(Map<String, dynamic> data, String key,
-      {String fb = ''}) {
+  static String _s(Map<String, dynamic> data, String key, {String fb = ''}) {
     final v = data[key]?.toString().trim();
     return (v != null && v.isNotEmpty) ? v : fb;
   }
@@ -980,11 +1025,7 @@ class _AlumniPublicProfileScreenState
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF6B0000),
-              Color(0xFFB22222),
-              Color(0xFFCC4444),
-            ],
+            colors: [Color(0xFF6B0000), Color(0xFFB22222), Color(0xFFCC4444)],
             stops: [0.0, 0.6, 1.0],
           ),
         ),
@@ -993,6 +1034,17 @@ class _AlumniPublicProfileScreenState
 
 // ─────────────────────────────────────────────────────────────────────────────
 // _RelationshipWatcher
+//
+// FIX: Replaced the two where() queries for pending requests with direct
+// document snapshot listeners. The doc IDs follow the established pattern:
+//   outgoing: '${currentUid}_${otherUid}'
+//   incoming: '${otherUid}_${currentUid}'
+//
+// This means:
+//  • No composite indexes required — works immediately after deploy.
+//  • Listeners fire as soon as the doc exists/is deleted, so the UI updates
+//    in real time with zero extra reads.
+//  • _relationshipReady = true as soon as all 4 listeners emit once.
 // ─────────────────────────────────────────────────────────────────────────────
 class _RelationshipWatcher extends StatefulWidget {
   final String currentUid, otherUid;
@@ -1018,10 +1070,10 @@ class _RelationshipWatcherState extends State<_RelationshipWatcher> {
   final _db = FirebaseFirestore.instance;
   StreamSubscription? _connSub, _outSub, _inSub, _followSub;
 
-  bool _connReady   = false, _outReady   = false,
-       _inReady     = false, _followReady = false;
-  bool _connected   = false, _pendingOut = false,
-       _pendingIn   = false, _following  = false;
+  bool _connReady    = false, _outReady    = false,
+       _inReady      = false, _followReady = false;
+  bool _connected    = false, _pendingOut  = false,
+       _pendingIn    = false, _following   = false;
 
   @override
   void initState() {
@@ -1046,8 +1098,16 @@ class _RelationshipWatcherState extends State<_RelationshipWatcher> {
   }
 
   void _subscribe() {
-    if (widget.currentUid.isEmpty || widget.otherUid.isEmpty) return;
+    if (widget.currentUid.isEmpty || widget.otherUid.isEmpty) {
+      // Still mark ready so UI doesn't spin forever
+      widget.onChanged(
+        connected: false, pendingOut: false, pendingIn: false,
+        following: false, ready: true,
+      );
+      return;
+    }
 
+    // 1. Connection sub-collection doc
     _connSub = _db
         .collection('users')
         .doc(widget.currentUid)
@@ -1059,28 +1119,40 @@ class _RelationshipWatcherState extends State<_RelationshipWatcher> {
           onError: (_) { _connReady = true; _notify(); },
         );
 
+    // FIX 2. Outgoing request — direct doc read, no where() query
     _outSub = _db
         .collection('friend_requests')
-        .where('fromUid', isEqualTo: widget.currentUid)
-        .where('toUid', isEqualTo: widget.otherUid)
-        .limit(1)
+        .doc('${widget.currentUid}_${widget.otherUid}')
         .snapshots()
         .listen(
-          (s) { _pendingOut = s.docs.isNotEmpty; _outReady = true; _notify(); },
+          (s) {
+            // Only count it as pending if status field says 'pending'
+            final data = s.data() as Map<String, dynamic>?;
+            _pendingOut = s.exists &&
+                data?['status']?.toString() == 'pending';
+            _outReady = true;
+            _notify();
+          },
           onError: (_) { _outReady = true; _notify(); },
         );
 
+    // FIX 3. Incoming request — direct doc read, no where() query
     _inSub = _db
         .collection('friend_requests')
-        .where('fromUid', isEqualTo: widget.otherUid)
-        .where('toUid', isEqualTo: widget.currentUid)
-        .limit(1)
+        .doc('${widget.otherUid}_${widget.currentUid}')
         .snapshots()
         .listen(
-          (s) { _pendingIn = s.docs.isNotEmpty; _inReady = true; _notify(); },
+          (s) {
+            final data = s.data() as Map<String, dynamic>?;
+            _pendingIn = s.exists &&
+                data?['status']?.toString() == 'pending';
+            _inReady = true;
+            _notify();
+          },
           onError: (_) { _inReady = true; _notify(); },
         );
 
+    // 4. Following sub-collection doc
     _followSub = _db
         .collection('users')
         .doc(widget.currentUid)
@@ -1096,10 +1168,10 @@ class _RelationshipWatcherState extends State<_RelationshipWatcher> {
   void _notify() {
     if (!mounted) return;
     widget.onChanged(
-      connected: _connected,
+      connected:  _connected,
       pendingOut: _pendingOut,
-      pendingIn: _pendingIn,
-      following: _following,
+      pendingIn:  _pendingIn,
+      following:  _following,
       ready: _connReady && _outReady && _inReady && _followReady,
     );
   }
@@ -1150,48 +1222,39 @@ class _CareerSection extends StatelessWidget {
             icon: Icons.emoji_events_outlined,
             child: Column(
               children: docs.asMap().entries.map((entry) {
-                final d =
-                    entry.value.data() as Map<String, dynamic>? ?? {};
-                final title   = d['title']?.toString() ?? '';
+                final d = entry.value.data() as Map<String, dynamic>? ?? {};
+                final title   = d['title']?.toString()   ?? '';
                 final company = d['company']?.toString() ?? '';
-                final year    = d['year']?.toString() ?? '';
-                if (title.isEmpty && company.isEmpty)
-                  return const SizedBox.shrink();
+                final year    = d['year']?.toString()    ?? '';
+                if (title.isEmpty && company.isEmpty) return const SizedBox.shrink();
                 return Column(children: [
                   if (entry.key > 0)
-                    Divider(
-                        height: 24,
-                        color: AppColors.borderSubtle.withOpacity(0.6)),
-                  Row(
+                    Divider(height: 24, color: AppColors.borderSubtle.withOpacity(0.6)),
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const _IconBox(icon: Icons.work_outline),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const _IconBox(icon: Icons.work_outline),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (title.isNotEmpty)
-                                Text(title,
-                                    style: GoogleFonts.inter(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppColors.darkText)),
-                              if (company.isNotEmpty)
-                                Text(company,
-                                    style: GoogleFonts.inter(
-                                        fontSize: 13,
-                                        color: AppColors.brandRed,
-                                        fontWeight: FontWeight.w500)),
-                              if (year.isNotEmpty)
-                                Text(year,
-                                    style: GoogleFonts.inter(
-                                        fontSize: 12,
-                                        color: AppColors.mutedText)),
-                            ],
-                          ),
-                        ),
-                      ]),
+                        if (title.isNotEmpty)
+                          Text(title,
+                              style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.darkText)),
+                        if (company.isNotEmpty)
+                          Text(company,
+                              style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  color: AppColors.brandRed,
+                                  fontWeight: FontWeight.w500)),
+                        if (year.isNotEmpty)
+                          Text(year,
+                              style: GoogleFonts.inter(
+                                  fontSize: 12, color: AppColors.mutedText)),
+                      ],
+                    )),
+                  ]),
                 ]);
               }).toList(),
             ),
@@ -1204,24 +1267,26 @@ class _CareerSection extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _ExpItem
+// Small reusable widgets
 // ─────────────────────────────────────────────────────────────────────────────
+
 class _ExpItem extends StatelessWidget {
   final Map<String, dynamic> exp;
   const _ExpItem({required this.exp});
 
   @override
   Widget build(BuildContext context) {
-    final title       = exp['title']?.toString() ?? '';
-    final company     = exp['company']?.toString() ?? '';
-    final location    = exp['location']?.toString() ?? '';
+    final title       = exp['title']?.toString()       ?? '';
+    final company     = exp['company']?.toString()     ?? '';
+    final location    = exp['location']?.toString()    ?? '';
     final description = exp['description']?.toString() ?? '';
 
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const _IconBox(icon: Icons.work_outline_rounded),
       const SizedBox(width: 12),
-      Expanded(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Expanded(child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           if (title.isNotEmpty)
             Text(title,
                 style: GoogleFonts.inter(
@@ -1238,18 +1303,14 @@ class _ExpItem extends StatelessWidget {
           ],
           const SizedBox(height: 3),
           Text(_formatPeriod(exp['start'], exp['end']),
-              style:
-                  GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText)),
+              style: GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText)),
           if (location.isNotEmpty) ...[
             const SizedBox(height: 2),
             Row(children: [
-              const Icon(Icons.location_on_outlined,
-                  size: 12, color: AppColors.mutedText),
+              const Icon(Icons.location_on_outlined, size: 12, color: AppColors.mutedText),
               const SizedBox(width: 3),
-              Flexible(
-                  child: Text(location,
-                      style: GoogleFonts.inter(
-                          fontSize: 12, color: AppColors.mutedText))),
+              Flexible(child: Text(location,
+                  style: GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText))),
             ]),
           ],
           if (description.isNotEmpty) ...[
@@ -1260,44 +1321,42 @@ class _ExpItem extends StatelessWidget {
                     color: AppColors.darkText.withOpacity(0.8),
                     height: 1.5)),
           ],
-        ]),
-      ),
+        ],
+      )),
     ]);
   }
 
   String _formatPeriod(dynamic start, dynamic end) {
     final s = _d(start);
-    if (end == null) return '$s – Present';
-    return '$s – ${_d(end)}';
+    if (end == null) return s.isNotEmpty ? '$s – Present' : 'Present';
+    final e = _d(end);
+    return s.isNotEmpty ? '$s – $e' : e;
   }
 
   String _d(dynamic v) {
     if (v == null) return '';
-    final dt =
-        v is Timestamp ? v.toDate() : DateTime.tryParse(v.toString());
+    final dt = v is Timestamp ? v.toDate() : DateTime.tryParse(v.toString());
     return dt != null ? DateFormat('MMM yyyy').format(dt) : '';
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _EduItem
-// ─────────────────────────────────────────────────────────────────────────────
 class _EduItem extends StatelessWidget {
   final Map<String, dynamic> edu;
   const _EduItem({required this.edu});
 
   @override
   Widget build(BuildContext context) {
-    final degree       = edu['degree']?.toString() ?? '';
-    final school       = edu['school']?.toString() ?? '';
+    final degree       = edu['degree']?.toString()       ?? '';
+    final school       = edu['school']?.toString()       ?? '';
     final fieldOfStudy = edu['fieldOfStudy']?.toString() ?? '';
-    final grade        = edu['grade']?.toString() ?? '';
+    final grade        = edu['grade']?.toString()        ?? '';
 
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const _IconBox(icon: Icons.school_outlined),
       const SizedBox(width: 12),
-      Expanded(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Expanded(child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           if (degree.isNotEmpty)
             Text(degree,
                 style: GoogleFonts.inter(
@@ -1314,27 +1373,23 @@ class _EduItem extends StatelessWidget {
           ],
           const SizedBox(height: 3),
           Text(_formatPeriod(edu['start'], edu['end']),
-              style:
-                  GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText)),
+              style: GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText)),
           if (fieldOfStudy.isNotEmpty) ...[
             const SizedBox(height: 2),
             Text(fieldOfStudy,
-                style: GoogleFonts.inter(
-                    fontSize: 12, color: AppColors.mutedText)),
+                style: GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText)),
           ],
           if (grade.isNotEmpty) ...[
             const SizedBox(height: 6),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: Colors.amber.shade50,
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(color: Colors.amber.shade200),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.military_tech_outlined,
-                    size: 12, color: Colors.amber.shade700),
+                Icon(Icons.military_tech_outlined, size: 12, color: Colors.amber.shade700),
                 const SizedBox(width: 4),
                 Text(grade,
                     style: GoogleFonts.inter(
@@ -1344,8 +1399,8 @@ class _EduItem extends StatelessWidget {
               ]),
             ),
           ],
-        ]),
-      ),
+        ],
+      )),
     ]);
   }
 
@@ -1353,20 +1408,15 @@ class _EduItem extends StatelessWidget {
     final s = _d(start);
     final e = _d(end);
     if (e.isEmpty) return s.isNotEmpty ? '$s – Present' : '';
-    return '$s – $e';
+    return s.isNotEmpty ? '$s – $e' : e;
   }
 
   String _d(dynamic v) {
     if (v == null) return '';
-    final dt =
-        v is Timestamp ? v.toDate() : DateTime.tryParse(v.toString());
+    final dt = v is Timestamp ? v.toDate() : DateTime.tryParse(v.toString());
     return dt != null ? DateFormat('MMM yyyy').format(dt) : '';
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Small reusable widgets
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _SectionCard extends StatelessWidget {
   final String title;
@@ -1435,8 +1485,7 @@ class _MetaBit extends StatelessWidget {
           Icon(icon, size: 12, color: AppColors.mutedText),
           const SizedBox(width: 4),
           Text(text,
-              style: GoogleFonts.inter(
-                  fontSize: 12, color: AppColors.mutedText)),
+              style: GoogleFonts.inter(fontSize: 12, color: AppColors.mutedText)),
         ],
       );
 }
@@ -1516,11 +1565,9 @@ class _ActionBtn extends StatelessWidget {
     const padding = EdgeInsets.symmetric(horizontal: 14, vertical: 9);
     final content = loading
         ? SizedBox(
-            width: 16,
-            height: 16,
+            width: 16, height: 16,
             child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: outlined ? color : Colors.white))
+                strokeWidth: 2, color: outlined ? color : Colors.white))
         : Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(icon, size: 14),
             const SizedBox(width: 5),
@@ -1534,8 +1581,7 @@ class _ActionBtn extends StatelessWidget {
             style: OutlinedButton.styleFrom(
                 foregroundColor: color,
                 side: BorderSide(color: color),
-                padding: padding,
-                shape: shape),
+                padding: padding, shape: shape),
             onPressed: loading ? null : onPressed,
             child: content,
           )
@@ -1544,8 +1590,7 @@ class _ActionBtn extends StatelessWidget {
                 backgroundColor: color,
                 foregroundColor: Colors.white,
                 elevation: 0,
-                padding: padding,
-                shape: shape),
+                padding: padding, shape: shape),
             onPressed: loading ? null : onPressed,
             child: content,
           );
