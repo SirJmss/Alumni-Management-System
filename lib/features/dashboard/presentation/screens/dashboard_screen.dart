@@ -12,19 +12,7 @@ import 'package:alumni/features/event/presentation/screens/job_opportunities_scr
 import 'package:alumni/features/notification/notification_screen.dart';
 import 'package:alumni/features/admin/data/services/in_app_notification.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DashboardScreen
-//
-// CHANGES v2:
-//  - Wrapped in InAppNotificationOverlay for real-time pop-up banners
-//  - AppBar bell now uses totalBadgeCountStream (counts grouped messages properly)
-//  - Quick-action "Alerts" badge uses unreadCountStream
-//  - Quick-action "Messages" badge uses unreadCountByTypeStream(message)
-//  - Quick-action "Network" badge uses unreadCountByTypeStream(friendRequest)
-//  - Jobs section notifies via NotifType.jobOpportunity
-//  - All send calls use typed NotifType enum
-//  - Input validation throughout _sendConnectionRequest / _followAlumni
-// ─────────────────────────────────────────────────────────────────────────────
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 

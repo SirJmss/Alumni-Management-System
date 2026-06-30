@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:alumni/core/constants/app_colors.dart';
-
+import 'package:alumni/features/admin/presentation/components/sidebar.dart';
 // ── Design tokens (matching job board) ──────────────────────────────────────
 const _kBg       = Color(0xFFF8F9FB);
 const _kBorder   = Color(0xFFEEF0F4);
@@ -83,10 +83,10 @@ class EventPlanningScreen extends StatefulWidget {
 }
 
 class _EventPlanningScreenState extends State<EventPlanningScreen> {
-  String? _userRole;
-  String  _adminName   = 'Admin';
-  String  _searchQuery = '';
-  String? _statusFilter;
+ StaffRole _role       = StaffRole.unknown;
+bool      _roleLoaded = false;
+String    _searchQuery = '';
+String?   _statusFilter;
 
   @override
   void initState() {
@@ -94,25 +94,23 @@ class _EventPlanningScreenState extends State<EventPlanningScreen> {
     _loadUserRole();
   }
 
-  Future<void> _loadUserRole() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    try {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      if (doc.exists && mounted) {
-        final d = doc.data()!;
-        setState(() {
-          _userRole  = d['role']?.toString()     ?? 'alumni';
-          _adminName = d['name']?.toString()     ??
-                       d['fullName']?.toString() ??
-                       user.displayName          ?? 'Admin';
-        });
-      }
-    } catch (e) { debugPrint('Role load error: $e'); }
-  }
+Future<void> _loadUserRole() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
+  try {
+    final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+    if (doc.exists && mounted) {
+      final d = doc.data()!;
+      setState(() {
+        _role       = StaffRoleX.from(d['role']?.toString());
+        _roleLoaded = true;
+      });
+    }
+  } catch (e) { debugPrint('Role load error: $e'); }
+}
 
-  bool get _canManage => _userRole == 'admin' || _userRole == 'moderator';
-  bool get _hasAccess => _canManage;
+bool get _canManage => _role.canManageEvents;
+bool get _hasAccess => _canManage;
 
   // ══════════════════════════════════════════════════════
   //  DIALOGS
@@ -418,8 +416,7 @@ class _EventPlanningScreenState extends State<EventPlanningScreen> {
                         } else {
                           payload['createdAt']    = FieldValue.serverTimestamp();
                           payload['createdBy']    = FirebaseAuth.instance.currentUser?.uid ?? '';
-                          payload['createdByRole']= _userRole ?? '';
-                          payload['likesCount']   = 0;
+payload['createdByRole']= _role.toString().split('.').last;                          payload['likesCount']   = 0;
                           await FirebaseFirestore.instance.collection('events').add(payload);
                         }
                         if (ctx.mounted) {
@@ -628,177 +625,70 @@ class _EventPlanningScreenState extends State<EventPlanningScreen> {
   //  BUILD
   // ══════════════════════════════════════════════════════
 
-  @override
-  Widget build(BuildContext context) {
-    if (!_hasAccess) {
-      return Scaffold(
-        backgroundColor: _kBg,
-        body: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Container(width: 80, height: 80,
-              decoration: BoxDecoration(
-                  color: AppColors.brandRed.withOpacity(0.08), shape: BoxShape.circle),
-              child: const Icon(Icons.lock_outline, size: 40, color: AppColors.brandRed)),
-          const SizedBox(height: 24),
-          Text('Access Denied',
-              style: GoogleFonts.cormorantGaramond(
-                  fontSize: 28, fontWeight: FontWeight.w600, color: AppColors.darkText)),
-          const SizedBox(height: 12),
-          Text(
-            'Your role (${_userRole?.toUpperCase() ?? 'UNKNOWN'}) does not have\npermission to access this page.',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(fontSize: 14, color: AppColors.mutedText, height: 1.6),
-          ),
-          const SizedBox(height: 32),
-          ElevatedButton.icon(
-            onPressed: () => Navigator.pushNamedAndRemoveUntil(context, '/admin_dashboard', (r) => false),
-            icon: const Icon(Icons.arrow_back, size: 16),
-            label: Text('Back to Dashboard', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.brandRed, foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-          ),
-        ])),
-      );
-    }
-
-    return Scaffold(
+@override
+Widget build(BuildContext context) {
+  // ─── Wait for role to load before deciding access ───
+  if (!_roleLoaded) {
+    return const Scaffold(
       backgroundColor: _kBg,
-      body: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _buildSidebar(),
-        Expanded(
-          child: Column(children: [
-            _buildTopBar(),
-            _buildSearchFilterBar(),
-            Expanded(child: _buildEventList()),
-          ]),
-        ),
-      ]),
+      body: Center(child: CircularProgressIndicator(color: AppColors.brandRed)),
     );
   }
+
+  // ─── Role-based access guard ───
+  if (!_hasAccess) {
+    return Scaffold(
+      backgroundColor: _kBg,
+      body: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(width: 80, height: 80,
+            decoration: BoxDecoration(
+                color: AppColors.brandRed.withOpacity(0.08), shape: BoxShape.circle),
+            child: const Icon(Icons.lock_outline, size: 40, color: AppColors.brandRed)),
+        const SizedBox(height: 24),
+        Text('Access Denied',
+            style: GoogleFonts.cormorantGaramond(
+                fontSize: 28, fontWeight: FontWeight.w600, color: AppColors.darkText)),
+        const SizedBox(height: 12),
+        Text(
+          'Your role (${_role.toString().split('.').last.toUpperCase()}) does not have\npermission to access this page.',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(fontSize: 14, color: AppColors.mutedText, height: 1.6),
+        ),
+        const SizedBox(height: 32),
+        ElevatedButton.icon(
+          onPressed: () => Navigator.pushNamedAndRemoveUntil(context, '/admin_dashboard', (r) => false),
+          icon: const Icon(Icons.arrow_back, size: 16),
+          label: Text('Back to Dashboard', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.brandRed, foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        ),
+      ])),
+    );
+  }
+
+  return Scaffold(
+    backgroundColor: _kBg,
+  body: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    Sidebar(activeRoute: '/event_planning', role: _role),
+      Expanded(
+        child: Column(children: [
+          _buildTopBar(),
+          _buildSearchFilterBar(),
+          Expanded(child: _buildEventList()),
+        ]),
+      ),
+    ]),
+  );
+}
 
   // ── Sidebar ──────────────────────────────────────────────────────────────
 
-  Widget _buildSidebar() {
-    return Container(
-      width: 272,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(right: BorderSide(color: _kBorder)),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(28, 32, 28, 24),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('ALUMNI',
-                style: GoogleFonts.cormorantGaramond(
-                    fontSize: 22, letterSpacing: 6,
-                    color: AppColors.brandRed, fontWeight: FontWeight.w300)),
-            const SizedBox(height: 4),
-            Text('ARCHIVE PORTAL',
-                style: GoogleFonts.inter(fontSize: 9, letterSpacing: 2,
-                    color: AppColors.mutedText, fontWeight: FontWeight.bold)),
-          ]),
-        ),
-        const Divider(height: 1, color: _kBorder),
-        const SizedBox(height: 16),
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _navSection('NETWORK', [
-                _navItem(Icons.dashboard_outlined, 'Overview', route: '/admin_dashboard'),
-              ]),
-              const SizedBox(height: 20),
-              _navSection('ENGAGEMENT', [
-                _navItem(Icons.emoji_events_outlined, 'Career Milestones', route: '/career_milestones'),
-              ]),
-              const SizedBox(height: 20),
-              _navSection('ADMIN FEATURES', [
-                _navItem(Icons.verified_user_outlined, 'User Verification',
-                    route: '/user_verification_moderation'),
-                _navItem(Icons.event_outlined, 'Event Planning',
-                    route: '/event_planning', isActive: true),
-                _navItem(Icons.work_outline, 'Job Board Management',
-                    route: '/job_board_management'),
-                _navItem(Icons.bar_chart_outlined, 'Growth Metrics', route: '/growth_metrics'),
-                _navItem(Icons.campaign_outlined, 'Announcements',
-                    route: '/announcement_management'),
-              ]),
-            ]),
-          ),
-        ),
-        const Divider(height: 1, color: _kBorder),
-        Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: AppColors.brandRed.withOpacity(0.1),
-              child: Text(
-                _adminName.isNotEmpty ? _adminName[0].toUpperCase() : 'A',
-                style: GoogleFonts.cormorantGaramond(
-                    color: AppColors.brandRed, fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(_adminName,
-                  style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600),
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
-              Text((_userRole ?? 'admin').toUpperCase(),
-                  style: GoogleFonts.inter(fontSize: 9, color: AppColors.mutedText)),
-            ])),
-            IconButton(
-              onPressed: () async {
-                await FirebaseAuth.instance.signOut();
-                if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
-              },
-              icon: const Icon(Icons.logout_rounded, size: 16, color: AppColors.mutedText),
-              tooltip: 'Sign out',
-            ),
-          ]),
-        ),
-      ]),
-    );
-  }
 
-  Widget _navSection(String title, List<Widget> items) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(
-        padding: const EdgeInsets.only(left: 12, bottom: 8),
-        child: Text(title,
-            style: GoogleFonts.inter(fontSize: 9, letterSpacing: 2, fontWeight: FontWeight.w700,
-                color: AppColors.mutedText.withOpacity(0.6))),
-      ),
-      ...items,
-    ]);
-  }
 
-  Widget _navItem(IconData icon, String label, {String? route, bool isActive = false}) {
-    return Material(
-      color: isActive ? AppColors.brandRed.withOpacity(0.07) : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        onTap: route != null && !isActive ? () => Navigator.pushNamed(context, route) : null,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(children: [
-            Icon(icon, size: 17,
-                color: isActive ? AppColors.brandRed : AppColors.mutedText),
-            const SizedBox(width: 10),
-            Text(label,
-                style: GoogleFonts.inter(
-                    fontSize: 13,
-                    color: isActive ? AppColors.brandRed : AppColors.darkText,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w400)),
-          ]),
-        ),
-      ),
-    );
-  }
+
 
   // ── Top bar ──────────────────────────────────────────────────────────────
 

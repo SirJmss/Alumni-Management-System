@@ -10,29 +10,12 @@ import 'package:alumni/features/admin/data/services/csv_parser.dart';
 import 'package:alumni/features/admin/data/services/excel_parser.dart';
 import 'package:alumni/features/admin/data/services/registry_service.dart';
 import 'package:alumni/features/admin/presentation/screens/create_user_panel.dart';
+import 'package:alumni/features/admin/presentation/components/sidebar.dart';
 
 // ══════════════════════════════════════════════════════════════════════════
 //  ROLE PERMISSIONS
 // ══════════════════════════════════════════════════════════════════════════
-enum StaffRole { admin, registrar, moderator, unknown }
 
-extension StaffRoleX on StaffRole {
-  bool get canVerifyUsers      => this == StaffRole.admin || this == StaffRole.registrar;
-  bool get canManageEvents     => this == StaffRole.admin || this == StaffRole.moderator;
-  bool get canManageJobs       => this == StaffRole.admin;
-  bool get canManageAnnouncements => this == StaffRole.admin || this == StaffRole.moderator;
-  bool get canApprovePost      => this == StaffRole.admin || this == StaffRole.moderator;
-  bool get canSeeGrowthMetrics => this == StaffRole.admin || this == StaffRole.registrar;
-
-  static StaffRole from(String? raw) {
-    switch (raw?.toLowerCase().trim()) {
-      case 'admin':     return StaffRole.admin;
-      case 'registrar': return StaffRole.registrar;
-      case 'moderator': return StaffRole.moderator;
-      default:          return StaffRole.unknown;
-    }
-  }
-}
 
 class UserVerificationScreen extends StatefulWidget {
   const UserVerificationScreen({super.key});
@@ -54,9 +37,8 @@ class _UserVerificationScreenState
 
   bool isLoading = true;
   String? errorMessage;
-  String _adminName = 'Admin';
-  String _adminRole = 'ADMIN';
-  StaffRole _role = StaffRole.unknown;
+  StaffRole _role = StaffRole.unknown; bool _roleLoaded = false;
+
 
   final _searchController = TextEditingController();
   String _searchText = '';
@@ -105,16 +87,10 @@ class _UserVerificationScreenState
           .get();
       if (doc.exists && mounted) {
         final data = doc.data()!;
-        setState(() {
-          _adminName = data['name']?.toString() ??
-              data['fullName']?.toString() ??
-              user.displayName ??
-              'Admin';
-          _adminRole =
-              data['role']?.toString().toUpperCase() ??
-                  'ADMIN';
-          _role = StaffRoleX.from(data['role']?.toString());
-        });
+setState(() {
+  _role = StaffRoleX.from(data['role']?.toString());
+  _roleLoaded = true;
+});
       }
     } catch (_) {}
   }
@@ -341,12 +317,12 @@ class _UserVerificationScreenState
         return;
       }
 
-      final upload =
-          await _registryService.uploadRecords(
-        records: records,
-        fileName: file.name,
-        uploadedByName: _adminName,
-      );
+final upload =
+    await _registryService.uploadRecords(
+  records: records,
+  fileName: file.name,
+  uploadedByName: FirebaseAuth.instance.currentUser?.displayName ?? 'Admin',
+);
 
       if (mounted) {
         _showSnackBar(
@@ -2831,471 +2807,254 @@ class _UserVerificationScreenState
   //  BUILD
   // ══════════════════════════════════════════
 
-  @override
-  Widget build(BuildContext context) {
-    // ─── Role-based access guard ───
-    if (!_role.canVerifyUsers) {
-      return Scaffold(
-        backgroundColor: AppColors.softWhite,
-        body: Center(
+// ══════════════════════════════════════════
+//  BUILD
+// ══════════════════════════════════════════
+
+@override
+Widget build(BuildContext context) {
+  // ─── Wait for role to load before deciding access ───
+  if (!_roleLoaded) {
+    return const Scaffold(
+      backgroundColor: AppColors.softWhite,
+      body: Center(
+        child: CircularProgressIndicator(color: AppColors.brandRed),
+      ),
+    );
+  }
+
+  // ─── Role-based access guard ───
+  if (!_role.canVerifyUsers) {
+    return Scaffold(
+      backgroundColor: AppColors.softWhite,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppColors.brandRed.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.lock_outline,
+                  size: 40, color: AppColors.brandRed),
+            ),
+            const SizedBox(height: 24),
+            Text('Access Denied',
+                style: GoogleFonts.cormorantGaramond(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.darkText)),
+            const SizedBox(height: 12),
+            Text(
+              'Your role (${_role.toString().split('.').last.toUpperCase()}) does not have\npermission to access this page.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppColors.mutedText,
+                  height: 1.6),
+            ),
+            const SizedBox(height: 32),
+            ElevatedButton.icon(
+              onPressed: () =>
+                  Navigator.pushNamedAndRemoveUntil(
+                      context, '/admin_dashboard', (r) => false),
+              icon: const Icon(Icons.arrow_back, size: 16),
+              label: Text('Back to Dashboard',
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.brandRed,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  return Scaffold(
+    backgroundColor: AppColors.softWhite,
+    body: Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+
+        Sidebar(
+          activeRoute: '/user_verification_moderation',
+          role: _role,
+        ),
+
+        // ─── Main content ───
+        Expanded(
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  color: AppColors.brandRed.withOpacity(0.1),
-                  shape: BoxShape.circle,
+                color: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 40, vertical: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                            _currentTab == 4
+                                ? 'Alumni Registry'
+                                : 'Trust & Safety Dashboard',
+                            style: GoogleFonts.cormorantGaramond(
+                                fontSize: 32,
+                                fontWeight: FontWeight.w400,
+                                color: AppColors.darkText)),
+                        Text(
+                            _currentTab == 4
+                                ? 'Upload and manage the official alumni registry.'
+                                : _currentTab == 3
+                                    ? 'Review applicants side-by-side with registry records.'
+                                    : _currentTab == 1
+                                        ? 'Accounts that have been rejected or denied access.'
+                                        : 'Verify identities and moderate community interactions.',
+                            style: GoogleFonts.inter(
+                                fontSize: 13,
+                                color: AppColors.mutedText)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_currentTab != 4)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 12),
+                            child: ElevatedButton.icon(
+                              onPressed: _loadUsers,
+                              icon: const Icon(Icons.refresh, size: 16),
+                              label: Text('',
+                                  style: GoogleFonts.inter(
+                                      fontWeight: FontWeight.w600)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor:
+                                    const Color.fromARGB(255, 253, 253, 253),
+                                foregroundColor:
+                                    const Color.fromARGB(255, 0, 0, 0),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 0, vertical: 0),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(30)),
+                              ),
+                            ),
+                          ),
+                        ElevatedButton.icon(
+                          onPressed: () => CreateUserPanel.show(context),
+                          icon: const Icon(Icons.person_add_alt_1_outlined,
+                              size: 16),
+                          label: Text('Create User',
+                              style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w600)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.brandRed,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                child: const Icon(Icons.lock_outline,
-                    size: 40, color: AppColors.brandRed),
               ),
-              const SizedBox(height: 24),
-              Text('Access Denied',
-                  style: GoogleFonts.cormorantGaramond(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.darkText)),
-              const SizedBox(height: 12),
-              Text(
-                'Your role (${_role.toString().split('.').last.toUpperCase()}) does not have\npermission to access this page.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.inter(
-                    fontSize: 14,
-                    color: AppColors.mutedText,
-                    height: 1.6),
-              ),
-              const SizedBox(height: 32),
-              ElevatedButton.icon(
-                onPressed: () =>
-                    Navigator.pushNamedAndRemoveUntil(
-                        context, '/admin_dashboard', (r) => false),
-                icon: const Icon(Icons.arrow_back, size: 16),
-                label: Text('Back to Dashboard',
-                    style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w600)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.brandRed,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
+
+              // ─── Stats chips ───
+              if (_currentTab != 4)
+                Container(
+                  color: AppColors.cardWhite,
+                  padding: const EdgeInsets.fromLTRB(40, 10, 40, 10),
+                  child: Row(children: [
+                    _statChip('Total', allUsers.length.toString(),
+                        AppColors.mutedText),
+                    const SizedBox(width: 10),
+                    _statChip('Queue', verificationQueue.length.toString(),
+                        Colors.orange),
+                    const SizedBox(width: 10),
+                    _statChip('Rejected', rejectedUsers.length.toString(),
+                        AppColors.brandRed),
+                  ]),
                 ),
+
+              // ─── Tabs ───
+              Container(
+                color: AppColors.cardWhite,
+                padding: const EdgeInsets.fromLTRB(40, 8, 40, 12),
+                child: Column(children: [
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      _tabBtn('All Users', 0),
+                      const SizedBox(width: 8),
+                      _tabBtn('Rejected', 1),
+                      const SizedBox(width: 8),
+                      _tabBtn('Recent Logins', 2),
+                      const SizedBox(width: 8),
+                      _tabBtn('Verification Queue', 3),
+                      const SizedBox(width: 8),
+                      _tabBtn('Registry', 4),
+                    ]),
+                  ),
+                  if (_currentTab != 4 && _currentTab != 3) ...[
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: 400,
+                      child: TextField(
+                        controller: _searchController,
+                        style: GoogleFonts.inter(fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: 'Search name, email, role...',
+                          hintStyle: GoogleFonts.inter(
+                              color: AppColors.mutedText, fontSize: 13),
+                          prefixIcon: const Icon(Icons.search,
+                              color: AppColors.brandRed, size: 18),
+                          filled: true,
+                          fillColor: AppColors.softWhite,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                              vertical: 12, horizontal: 16),
+                        ),
+                      ),
+                    ),
+                  ],
+                ]),
+              ),
+
+              Expanded(
+                child: _currentTab == 4
+                    ? _buildRegistryTab()
+                    : _currentTab == 3
+                        ? _buildVerificationQueueView()
+                        : isLoading
+                            ? const Center(
+                                child: CircularProgressIndicator(
+                                    color: AppColors.brandRed))
+                            : errorMessage != null
+                                ? Center(
+                                    child: Text(errorMessage!,
+                                        style: const TextStyle(
+                                            color: Colors.red)))
+                                : _buildTable(),
               ),
             ],
           ),
         ),
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: AppColors.softWhite,
-      body: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.stretch,
-        children: [
-          // ─── Sidebar ───
-          Container(
-            width: 280,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(
-                  right: BorderSide(
-                      color: AppColors.borderSubtle,
-                      width: 0.5)),
-            ),
-            child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
-                    children: [
-                      Text('ALUMNI',
-                          style: GoogleFonts
-                              .cormorantGaramond(
-                                  fontSize: 22,
-                                  letterSpacing: 6,
-                                  color:
-                                      AppColors.brandRed,
-                                  fontWeight:
-                                      FontWeight.w300)),
-                      const SizedBox(height: 6),
-                      Text('ARCHIVE PORTAL',
-                          style: GoogleFonts.inter(
-                              fontSize: 9,
-                              letterSpacing: 2,
-                              color: AppColors.mutedText,
-                              fontWeight:
-                                  FontWeight.bold)),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding:
-                        const EdgeInsets.symmetric(
-                            horizontal: 32),
-                    child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
-                      children: [
-                        _sidebarSection('NETWORK', [
-                          _sidebarItem('Overview',
-                              route:
-                                  '/admin_dashboard'),
-                        ]),
-                        const SizedBox(height: 32),
-                        _sidebarSection(
-                            'ENGAGEMENT', [
-                          _sidebarItem(
-                              'Career Milestones',
-                              route:
-                                  '/career_milestones'),
-                        ]),
-                        const SizedBox(height: 32),
-                        _sidebarSection(
-                            'ADMIN FEATURES', [
-                          _sidebarItem(
-                              'User Verification & Moderation',
-                              route:
-                                  '/user_verification_moderation',
-                              isActive: true),
-                          if (_role.canManageEvents)
-                            _sidebarItem(
-                                'Event Planning',
-                                route: '/event_planning'),
-                          if (_role.canManageJobs)
-                            _sidebarItem(
-                                'Job Board Management',
-                                route:
-                                    '/job_board_management'),
-                          if (_role.canSeeGrowthMetrics)
-                            _sidebarItem(
-                                'Growth Metrics',
-                                route: '/growth_metrics'),
-                          if (_role.canManageAnnouncements)
-                            _sidebarItem(
-                                'Announcement Management',
-                                route:
-                                    '/announcement_management'),
-                        ]),
-                      ],
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.all(32),
-                  decoration: BoxDecoration(
-                    border: Border(
-                        top: BorderSide(
-                            color: AppColors
-                                .borderSubtle
-                                .withOpacity(0.3))),
-                  ),
-                  child: Column(children: [
-                    Row(children: [
-                      CircleAvatar(
-                        radius: 16,
-                        backgroundColor:
-                            AppColors.brandRed
-                                .withOpacity(0.1),
-                        child: Text(
-                          _adminName.isNotEmpty
-                              ? _adminName[0]
-                                  .toUpperCase()
-                              : 'A',
-                          style: GoogleFonts
-                              .cormorantGaramond(
-                                  color:
-                                      AppColors.brandRed,
-                                  fontSize: 14),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
-                          children: [
-                            Text(_adminName,
-                                style: GoogleFonts.inter(
-                                    fontSize: 12,
-                                    fontWeight:
-                                        FontWeight.bold),
-                                maxLines: 1,
-                                overflow:
-                                    TextOverflow.ellipsis),
-                            Text(_adminRole,
-                                style: GoogleFonts.inter(
-                                    fontSize: 9,
-                                    color:
-                                        AppColors.mutedText)),
-                          ],
-                        ),
-                      ),
-                    ]),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: TextButton.icon(
-                        onPressed: () async {
-                          await FirebaseAuth.instance
-                              .signOut();
-                          if (mounted) {
-                            Navigator
-                                .pushNamedAndRemoveUntil(
-                                    context,
-                                    '/login',
-                                    (r) => false);
-                          }
-                        },
-                        icon: const Icon(Icons.logout,
-                            size: 13,
-                            color: AppColors.mutedText),
-                        label: Text('DISCONNECT',
-                            style: GoogleFonts.inter(
-                                fontSize: 10,
-                                letterSpacing: 2,
-                                color:
-                                    AppColors.mutedText,
-                                fontWeight:
-                                    FontWeight.bold)),
-                      ),
-                    ),
-                  ]),
-                ),
-              ],
-            ),
-          ),
-
-          // ─── Main content ───
-          Expanded(
-            
-            child: Column(
-              children: [
-                Container(
-                  color: Colors.white,
-                  
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 40, vertical: 16),
-                  child: Row(
-                    mainAxisAlignment:
-                        MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment:
-                            CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                              _currentTab == 4
-                                  ? 'Alumni Registry'
-                                  : 'Trust & Safety Dashboard',
-                              style: GoogleFonts
-                                  .cormorantGaramond(
-                                      fontSize: 32,
-                                      fontWeight:
-                                          FontWeight.w400,
-                                      color:
-                                          AppColors.darkText)),
-                          Text(
-                              _currentTab == 4
-                                  ? 'Upload and manage the official alumni registry.'
-                                  : _currentTab == 3
-                                      ? 'Review applicants side-by-side with registry records.'
-                                      : _currentTab == 1
-                                          ? 'Accounts that have been rejected or denied access.'
-                                          : 'Verify identities and moderate community interactions.',
-                                          
-                              style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  color:
-                                      AppColors.mutedText)),
-                        ],
-                        
-                      ),
-                      
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (_currentTab != 4)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 12),
-                              child: ElevatedButton.icon(
-                                onPressed: _loadUsers,
-                                icon: const Icon(
-                                    Icons.refresh,
-                                    size: 16),
-                                label: Text('',
-                                    style: GoogleFonts.inter(
-                                        fontWeight:
-                                            FontWeight.w600)),
-                                style:
-                                    ElevatedButton.styleFrom(
-                                  backgroundColor:
-                                      const Color.fromARGB(255, 253, 253, 253),
-                                  foregroundColor:
-                                      const Color.fromARGB(255, 0, 0, 0),
-                                  padding:
-                                      const EdgeInsets.symmetric(
-                                          horizontal: 0,
-                                          vertical: 0),
-                                  shape:
-                                      RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius
-                                                  .circular(30)),
-                                ),
-                              ),
-                            ),
-                          ElevatedButton.icon(
-                            onPressed: () => CreateUserPanel.show(context),
-                            icon: const Icon(Icons.person_add_alt_1_outlined, size: 16),
-                            label: Text('Create User', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.brandRed,
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-
-                    ],
-                  ),
-                ),
-
-                // ─── Stats chips ───
-                if (_currentTab != 4)
-                  Container(
-                    color: AppColors.cardWhite,
-                    padding: const EdgeInsets.fromLTRB(
-                        40, 10, 40, 10),
-                    child: Row(children: [
-                      _statChip(
-                          'Total',
-                          allUsers.length.toString(),
-                          AppColors.mutedText),
-                      const SizedBox(width: 10),
-                      _statChip(
-                          'Queue',
-                          verificationQueue.length
-                              .toString(),
-                          Colors.orange),
-                      const SizedBox(width: 10),
-                      _statChip(
-                          'Rejected',
-                          rejectedUsers.length
-                              .toString(),
-                          AppColors.brandRed),
-                    ]),
-                  ),
-
-                // ─── Tabs ───
-                Container(
-                  color: AppColors.cardWhite,
-                  padding: const EdgeInsets.fromLTRB(
-                      40, 8, 40, 12),
-                  child: Column(children: [
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(children: [
-                        
-                        _tabBtn('All Users', 0),
-                        const SizedBox(width: 8),
-                        // ─── Tab 1 is now Rejected ───
-                        _tabBtn('Rejected', 1),
-                        const SizedBox(width: 8),
-                        _tabBtn('Recent Logins', 2),
-                        const SizedBox(width: 8),
-                        _tabBtn(
-                            'Verification Queue', 3),
-                        const SizedBox(width: 8),
-                        _tabBtn('Registry', 4),
-                      ]),
-                      
-                      
-                      
-                    ),
-                  
-                    if (_currentTab != 4 &&
-                        _currentTab != 3) ...[
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: 400,
-                        child: TextField(
-                          controller: _searchController,
-                          style: GoogleFonts.inter(
-                              fontSize: 14),
-                          decoration: InputDecoration(
-                            hintText:
-                                'Search name, email, role...',
-                            hintStyle: GoogleFonts.inter(
-                                color:
-                                    AppColors.mutedText,
-                                fontSize: 13),
-                            prefixIcon: const Icon(
-                                Icons.search,
-                                color:
-                                    AppColors.brandRed,
-                                size: 18),
-                            filled: true,
-                            fillColor:
-                                AppColors.softWhite,
-                            border: OutlineInputBorder(
-                              borderRadius:
-                                  BorderRadius.circular(
-                                      12),
-                              borderSide:
-                                  BorderSide.none,
-                            ),
-                            contentPadding:
-                                const EdgeInsets
-                                    .symmetric(
-                                        vertical: 12,
-                                        horizontal: 16),
-                          ),
-                        ),
-                      ),
-                      
-                    ],
-                  ]),
-                  
-                ),
-
-                Expanded(
-                  child: _currentTab == 4
-                      ? _buildRegistryTab()
-                      : _currentTab == 3
-                          ? _buildVerificationQueueView()
-                          : isLoading
-                              ? const Center(
-                                  child:
-                                      CircularProgressIndicator(
-                                          color: AppColors
-                                              .brandRed))
-                              : errorMessage != null
-                                  ? Center(
-                                      child: Text(
-                                          errorMessage!,
-                                          style:
-                                              const TextStyle(
-                                                  color:
-                                                      Colors.red)))
-                                  : _buildTable(),
-                                  
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+      ],
+    ),
+  );
+}
 
   Widget _buildTable() {
 
@@ -3524,48 +3283,5 @@ class _UserVerificationScreenState
     );
   }
 
-  Widget _sidebarSection(
-      String title, List<Widget> items) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title,
-            style: GoogleFonts.inter(
-                fontSize: 10,
-                letterSpacing: 2,
-                fontWeight: FontWeight.bold,
-                color: AppColors.mutedText
-                    .withOpacity(0.7))),
-        const SizedBox(height: 16),
-        ...items,
-      ],
-    );
-  }
 
-  Widget _sidebarItem(String label,
-      {String? route, bool isActive = false}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: GestureDetector(
-        onTap: route != null && !isActive
-            ? () =>
-                Navigator.pushNamed(context, route)
-            : null,
-        child: MouseRegion(
-          cursor: route != null && !isActive
-              ? SystemMouseCursors.click
-              : SystemMouseCursors.basic,
-          child: Text(label,
-              style: GoogleFonts.inter(
-                  fontSize: 13.5,
-                  color: isActive
-                      ? AppColors.brandRed
-                      : AppColors.darkText,
-                  fontWeight: isActive
-                      ? FontWeight.w600
-                      : FontWeight.w400)),
-        ),
-      ),
-    );
-  }
 }
