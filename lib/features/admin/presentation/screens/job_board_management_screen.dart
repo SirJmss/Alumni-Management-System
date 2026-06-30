@@ -7,7 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:alumni/core/constants/app_colors.dart';
-
+import 'package:alumni/features/admin/presentation/components/sidebar.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 // JobBoardManagementScreen
 //
@@ -36,10 +36,12 @@ class JobBoardManagementScreen extends StatefulWidget {
 
 class _JobBoardManagementScreenState
     extends State<JobBoardManagementScreen> {
-  String? _selectedStatus;
-  String  _searchQuery = '';
-  String? _userRole;
-  String? _currentUid;
+String?   _selectedStatus;
+String    _searchQuery = '';
+String?   _userRole;
+String?   _currentUid;
+StaffRole _role        = StaffRole.unknown;
+bool      _roleLoaded  = false;
 
   @override
   void initState() {
@@ -48,24 +50,26 @@ class _JobBoardManagementScreenState
   }
 
   // ── Role loader ─────────────────────────────────────────────────────────
-  Future<void> _loadUserRole() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      if (doc.exists && mounted) {
-        setState(() {
-          _userRole   = doc.data()?['role']?.toString() ?? 'alumni';
-          _currentUid = user.uid;
-        });
-      }
-    } catch (e) {
-      debugPrint('Role load error: $e');
+Future<void> _loadUserRole() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return;
+  try {
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    if (doc.exists && mounted) {
+      setState(() {
+        _userRole   = doc.data()?['role']?.toString() ?? 'alumni';
+        _currentUid = user.uid;
+        _role       = StaffRoleX.from(_userRole);
+        _roleLoaded = true;
+      });
     }
+  } catch (e) {
+    debugPrint('Role load error: $e');
   }
+}
 
   bool get _isStaff =>
       _userRole == 'admin';
@@ -591,228 +595,90 @@ class _JobBoardManagementScreenState
   // ════════════════════════════════════════════════════════════════════════
   //  BUILD
   // ════════════════════════════════════════════════════════════════════════
-  @override
-  Widget build(BuildContext context) {
-    // ─── Role-based access guard ───
-    if (!_hasAccess) {
-      return Scaffold(
-        backgroundColor: AppColors.softWhite,
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  color: AppColors.brandRed.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.lock_outline,
-                    size: 40, color: AppColors.brandRed),
-              ),
-              const SizedBox(height: 24),
-              Text('Access Denied',
-                  style: GoogleFonts.cormorantGaramond(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.darkText)),
-              const SizedBox(height: 12),
-              Text(
-                'Your role (${_userRole?.toUpperCase() ?? 'UNKNOWN'}) does not have\npermission to access this page.',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.inter(
-                    fontSize: 14,
-                    color: AppColors.mutedText,
-                    height: 1.6),
-              ),
-              const SizedBox(height: 32),
-              ElevatedButton.icon(
-                onPressed: () =>
-                    Navigator.pushNamedAndRemoveUntil(
-                        context, '/admin_dashboard', (r) => false),
-                icon: const Icon(Icons.arrow_back, size: 16),
-                label: Text('Back to Dashboard',
-                    style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w600)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.brandRed,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+@override
+Widget build(BuildContext context) {
+  // ─── Wait for role to load before deciding access ───
+  if (!_roleLoaded) {
+    return const Scaffold(
+      backgroundColor: AppColors.softWhite,
+      body: Center(
+        child: CircularProgressIndicator(color: AppColors.brandRed),
+      ),
+    );
+  }
 
+  // ─── Role-based access guard ───
+  if (!_hasAccess) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FB),
-      body: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _buildSidebar(),
-        Expanded(
-          child: Column(children: [
-            _buildTopBar(),
-            _buildSearchAndFilters(),
-            Expanded(child: _buildJobList()),
-          ]),
-        ),
-      ]),
-    );
-  }
-
-  // ── Sidebar ──────────────────────────────────────────────────────────────
-  Widget _buildSidebar() {
-    return Container(
-      width: 272,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(right: BorderSide(color: Color(0xFFEEF0F4))),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(28, 32, 28, 24),
-          child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-            Text('ALUMNI',
+      backgroundColor: AppColors.softWhite,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppColors.brandRed.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.lock_outline,
+                  size: 40, color: AppColors.brandRed),
+            ),
+            const SizedBox(height: 24),
+            Text('Access Denied',
                 style: GoogleFonts.cormorantGaramond(
-                    fontSize: 22,
-                    letterSpacing: 6,
-                    color: AppColors.brandRed,
-                    fontWeight: FontWeight.w300)),
-            const SizedBox(height: 4),
-            Text('ARCHIVE PORTAL',
-                style: GoogleFonts.inter(
-                    fontSize: 9, letterSpacing: 2,
-                    color: AppColors.mutedText,
-                    fontWeight: FontWeight.bold)),
-          ]),
-        ),
-        const Divider(height: 1, color: Color(0xFFF0F0F0)),
-        const SizedBox(height: 16),
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-              _navSection('NETWORK', [
-                _navItem(Icons.dashboard_outlined, 'Overview',
-                    route: '/admin_dashboard'),
-              ]),
-              const SizedBox(height: 20),
-              _navSection('ENGAGEMENT', [
-                _navItem(Icons.emoji_events_outlined,
-                    'Career Milestones',
-                    route: '/career_milestones'),
-              ]),
-              const SizedBox(height: 20),
-              _navSection('ADMIN FEATURES', [
-                _navItem(Icons.verified_user_outlined,
-                    'User Verification',
-                    route: '/user_verification_moderation'),
-                _navItem(Icons.event_outlined, 'Event Planning',
-                    route: '/event_planning'),
-                _navItem(Icons.work_outline, 'Job Board',
-                    route: '/job_board_management', isActive: true),
-                _navItem(Icons.bar_chart_outlined, 'Growth Metrics',
-                    route: '/growth_metrics'),
-                _navItem(Icons.campaign_outlined, 'Announcements',
-                    route: '/announcement_management'),
-              ]),
-            ]),
-          ),
-        ),
-        const Divider(height: 1, color: Color(0xFFF0F0F0)),
-        Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: AppColors.brandRed.withOpacity(0.1),
-              child: Text('A',
-                  style: GoogleFonts.cormorantGaramond(
-                      color: AppColors.brandRed, fontSize: 16)),
+                    fontSize: 28,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.darkText)),
+            const SizedBox(height: 12),
+            Text(
+              'Your role (${_userRole?.toUpperCase() ?? 'UNKNOWN'}) does not have\npermission to access this page.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppColors.mutedText,
+                  height: 1.6),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                Text('Registrar Admin',
-                    style: GoogleFonts.inter(
-                        fontSize: 12, fontWeight: FontWeight.w600)),
-                Text('NETWORK OVERSEER',
-                    style: GoogleFonts.inter(
-                        fontSize: 9, color: AppColors.mutedText)),
-              ]),
+            const SizedBox(height: 32),
+            ElevatedButton.icon(
+              onPressed: () =>
+                  Navigator.pushNamedAndRemoveUntil(
+                      context, '/admin_dashboard', (r) => false),
+              icon: const Icon(Icons.arrow_back, size: 16),
+              label: Text('Back to Dashboard',
+                  style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.brandRed,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
             ),
-            IconButton(
-              onPressed: () async {
-                await FirebaseAuth.instance.signOut();
-                if (mounted) {
-                  Navigator.pushReplacementNamed(context, '/login');
-                }
-              },
-              icon: const Icon(Icons.logout_rounded,
-                  size: 16, color: AppColors.mutedText),
-              tooltip: 'Sign out',
-            ),
-          ]),
-        ),
-      ]),
-    );
-  }
-
-  Widget _navSection(String title, List<Widget> items) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Padding(
-        padding: const EdgeInsets.only(left: 12, bottom: 8),
-        child: Text(title,
-            style: GoogleFonts.inter(
-                fontSize: 9, letterSpacing: 2,
-                fontWeight: FontWeight.w700,
-                color: AppColors.mutedText.withOpacity(0.6))),
-      ),
-      ...items,
-    ]);
-  }
-
-  Widget _navItem(IconData icon, String label,
-      {String? route, bool isActive = false}) {
-    return Material(
-      color: isActive
-          ? AppColors.brandRed.withOpacity(0.07)
-          : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        onTap: route != null && !isActive
-            ? () => Navigator.pushNamed(context, route)
-            : null,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(children: [
-            Icon(icon,
-                size: 17,
-                color: isActive ? AppColors.brandRed : AppColors.mutedText),
-            const SizedBox(width: 10),
-            Text(label,
-                style: GoogleFonts.inter(
-                    fontSize: 13,
-                    color: isActive ? AppColors.brandRed : AppColors.darkText,
-                    fontWeight:
-                        isActive ? FontWeight.w600 : FontWeight.w400)),
-          ]),
+          ],
         ),
       ),
     );
   }
+
+return Scaffold(
+  backgroundColor: const Color(0xFFF8F9FB),
+  body: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    Sidebar(activeRoute: '/job_board_management', role: _role),
+    Expanded(
+        child: Column(children: [
+          _buildTopBar(),
+          _buildSearchAndFilters(),
+          Expanded(child: _buildJobList()),
+        ]),
+      ),
+    ]),
+  );
+}
+
 
   // ── Top bar ──────────────────────────────────────────────────────────────
   Widget _buildTopBar() {

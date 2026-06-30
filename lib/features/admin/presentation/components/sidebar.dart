@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:alumni/core/constants/app_colors.dart';
+import 'package:alumni/features/admin/presentation/screens/admin_post_approval.dart'
+    show CombinedPendingBadge;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared staff role + permissions, used by Sidebar to decide which nav
@@ -19,6 +21,7 @@ extension StaffRoleX on StaffRole {
   bool get canManageJobs          => this == StaffRole.admin;
   bool get canManageAnnouncements => this == StaffRole.admin || this == StaffRole.moderator;
   bool get canSeeGrowthMetrics    => this == StaffRole.admin || this == StaffRole.registrar;
+  bool get canApprovePost         => this == StaffRole.admin || this == StaffRole.moderator;
 
   static StaffRole from(String? raw) {
     switch (raw?.toLowerCase().trim()) {
@@ -54,10 +57,16 @@ class Sidebar extends StatelessWidget {
   /// items (Job Board, Growth Metrics, etc.) are shown.
   final StaffRole role;
 
+  /// Optional display info for the footer. Falls back to generic text.
+  final String? adminName;
+  final String? adminRole;
+
   const Sidebar({
     super.key,
     required this.activeRoute,
     this.role = StaffRole.admin,
+    this.adminName,
+    this.adminRole,
   });
 
   @override
@@ -124,6 +133,9 @@ class Sidebar extends StatelessWidget {
                 if (role.canManageAnnouncements)
                   _navItem(context, Icons.campaign_outlined, 'Announcements',
                       route: '/announcement_management'),
+                if (role.canApprovePost)
+                  _navItem(context, Icons.rate_review_outlined, 'Post Approval',
+                      route: '/post_approval', badge: const CombinedPendingBadge()),
               ]),
             ]),
           ),
@@ -135,7 +147,8 @@ class Sidebar extends StatelessWidget {
             CircleAvatar(
               radius: 18,
               backgroundColor: AppColors.brandRed.withOpacity(0.1),
-              child: Text('A',
+              child: Text((adminName?.isNotEmpty == true ? adminName![0] : 'A')
+                      .toUpperCase(),
                   style: GoogleFonts.cormorantGaramond(
                       color: AppColors.brandRed, fontSize: 16)),
             ),
@@ -144,10 +157,10 @@ class Sidebar extends StatelessWidget {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                Text('Registrar Admin',
+                Text(adminName ?? 'Registrar Admin',
                     style: GoogleFonts.inter(
                         fontSize: 12, fontWeight: FontWeight.w600)),
-                Text('NETWORK OVERSEER',
+                Text(adminRole ?? 'NETWORK OVERSEER',
                     style: GoogleFonts.inter(
                         fontSize: 9, color: AppColors.mutedText)),
               ]),
@@ -184,7 +197,7 @@ class Sidebar extends StatelessWidget {
   }
 
   Widget _navItem(BuildContext context, IconData icon, String label,
-      {required String route}) {
+      {required String route, Widget? badge}) {
     final isActive = activeRoute == route;
     return Material(
       color: isActive
@@ -203,12 +216,18 @@ class Sidebar extends StatelessWidget {
                 size: 17,
                 color: isActive ? AppColors.brandRed : AppColors.mutedText),
             const SizedBox(width: 10),
-            Text(label,
-                style: GoogleFonts.inter(
-                    fontSize: 13,
-                    color: isActive ? AppColors.brandRed : AppColors.darkText,
-                    fontWeight:
-                        isActive ? FontWeight.w600 : FontWeight.w400)),
+            Expanded(
+              child: Text(label,
+                  style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: isActive ? AppColors.brandRed : AppColors.darkText,
+                      fontWeight:
+                          isActive ? FontWeight.w600 : FontWeight.w400)),
+            ),
+            if (badge != null) ...[
+              const SizedBox(width: 8),
+              badge,
+            ],
           ]),
         ),
       ),
